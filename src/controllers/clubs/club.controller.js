@@ -242,7 +242,7 @@ export const searchClubs = async (req, res) => {
 
     const [clubs, total] = await Promise.all([
       Club.find({
-        clubName: regex,
+        clubId: regex,
         status: "active"
       })
         .select(
