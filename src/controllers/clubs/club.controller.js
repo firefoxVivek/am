@@ -13,7 +13,7 @@ export const createClub = async (req, res) => {
       clubName,
       image,
       about,
-      categories,
+      // categories,
       councilId,
       institutionId,
       privacy,
@@ -42,7 +42,7 @@ export const createClub = async (req, res) => {
       clubName,
       image,
       about,
-      categories,
+      // categories,
       councilId,
       institutionId,
       privacy,
@@ -142,9 +142,42 @@ export const getClubByClubId = async (req, res) => {
   const club = await Club.findOne({
     clubId: req.params.clubId,
     status: "active",
-  })
-    .populate("ownerId", "username")
-    // .populate("categories", "name");///////////////////
+  }).populate("ownerId", "username");
+
+  if (!club) {
+    return res.status(404).json({ message: "Club not found" });
+  }
+
+  const clubObj = club.toObject();
+
+  res.status(200).json({
+    data: {
+      ...clubObj,
+
+      // 👇 flatten populated user
+      owner: {
+        id: clubObj.ownerId._id.toString(),
+        name: clubObj.ownerId.username,
+      },
+
+      // ❌ remove populated object
+      ownerId: undefined,
+    },
+  });
+};
+
+
+export const getClubById = async (req, res) => {
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ message: "Invalid club id" });
+  }
+
+  const club = await Club.findOne({
+    _id: id,
+    status: "active",
+  }).populate("ownerId", "username");
 
   if (!club) {
     return res.status(404).json({ message: "Club not found" });

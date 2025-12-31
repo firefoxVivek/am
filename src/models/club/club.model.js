@@ -17,7 +17,7 @@ const ClubSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      index: true,
+      // index: true,
       trim: true,
       lowercase: true,
       match: /^[a-z0-9._]+$/,
@@ -45,13 +45,13 @@ const ClubSchema = new mongoose.Schema(
     },
  
 
-    categories: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Category",
-        index: true,
-      },
-    ],
+    // categories: [
+    //   {
+    //     type: mongoose.Schema.Types.ObjectId,
+    //     ref: "Category",
+    //     index: true,
+    //   },
+    // ],
  
 
     councilId: {

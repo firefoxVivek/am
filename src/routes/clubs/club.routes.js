@@ -6,7 +6,7 @@ import {
   deleteClub,getDeletedClubByUserId,
   checkClubIdAvailability,
 
-  getClubByClubId,
+  getClubByClubId,getClubById,
   getClubByUserId,
   getAllClubs,
   getClubsByCategory,
@@ -67,6 +67,7 @@ router.get("/search",  searchClubs);
 
 // Get club by clubId (public)
 router.get("/:clubId", getClubByClubId);
+router.get("/:clubId", getClubById);
 
 // Get club by owner (user)
 router.get("/user/:userId", getClubByUserId);
