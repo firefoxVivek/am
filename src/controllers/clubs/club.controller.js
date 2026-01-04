@@ -1,60 +1,109 @@
 import mongoose from "mongoose";
-import Club from "../../models/club/club.model.js";
-
-/* =====================================================
-   CREATE & MANAGEMENT
-===================================================== */
+import { Club } from "../../models/club/club.model.js";
+import { ClubMembership } from "../../models/connections/userToClub.model.js";
+import { ApiError } from "../../utils/ApiError.js";
+import { ApiResponse } from "../../utils/ApiResponse.js";
 
 export const createClub = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const ownerId = req.user._id;
+    const ownerName = req.user.displayName;
+
+    if (!ownerName) {
+      throw new ApiError(400, "Complete your profile before creating a club");
+    }
+
     const {
       clubId,
       clubName,
       image,
       about,
-      // categories,
-      councilId,
-      institutionId,
+      council,
+      institution,
       privacy,
     } = req.body;
 
+    /* ---------------- Validation ---------------- */
     if (!clubId || !clubName) {
-      return res
-        .status(400)
-        .json({ message: "clubId and clubName are required" });
+      throw new ApiError(400, "clubId and clubName are required");
     }
 
-    const exists = await Club.findOne({
-      $or: [{ clubId }, { ownerId }],
-    });
+    /* ---------------- Uniqueness Check ---------------- */
+    const existingClub = await Club.findOne(
+      {
+        $or: [
+          { clubId: clubId.toLowerCase() },
+          { "owner.id": ownerId },
+        ],
+      },
+      null,
+      { session }
+    );
 
-    if (exists) {
-      return res.status(409).json({
-        message:
-          "Club already exists with this clubId or user already owns a club",
-      });
+    if (existingClub) {
+      throw new ApiError(
+        409,
+        "Club already exists with this clubId or user already owns a club"
+      );
     }
 
-    const club = await Club.create({
-      ownerId,
-      clubId,
-      clubName,
-      image,
-      about,
-      // categories,
-      councilId,
-      institutionId,
-      privacy,
-      admins: [ownerId],
-      members: [ownerId],
-      membersCount: 1,
-    });
+    /* ---------------- Create Club ---------------- */
+    const [club] = await Club.create(
+      [
+        {
+          owner: {
+            id: ownerId,
+            displayName: ownerName, // ✅ CORRECT FIELD
+          },
 
-    res.status(201).json({ data: club });
+          clubId: clubId.toLowerCase(),
+          clubName,
+          image: image || null,
+          about: about || "",
+
+          council: council?.id
+            ? { id: council.id, name: council.name || null }
+            : null,
+
+          institution: institution?.id
+            ? { id: institution.id, name: institution.name || null }
+            : null,
+
+          privacy: privacy || "public",
+          membersCount: 1,
+          postsCount: 0,
+        },
+      ],
+      { session }
+    );
+
+    /* ---------------- Create Membership (OWNER) ---------------- */
+    await ClubMembership.create(
+      [
+        {
+          clubId: club._id,
+          userId: ownerId,
+          role: "owner",       // 🔥 OWNER ROLE
+          status: "approved",
+          joinedAt: new Date(),
+        },
+      ],
+      { session }
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(201).json(
+      new ApiResponse(201, club, "Club created successfully")
+    );
   } catch (error) {
-    console.error("Create club error:", error);
-    res.status(500).json({ message: error.message });
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
   }
 };
 
@@ -168,23 +217,126 @@ export const getClubByClubId = async (req, res) => {
 
 
 export const getClubById = async (req, res) => {
-  const { id } = req.params;
+  const { Id } = req.params;
+  const userId = req.user?._id;
 
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    return res.status(400).json({ message: "Invalid club id" });
+  if (!mongoose.Types.ObjectId.isValid(Id)) {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid club id",
+    });
   }
 
-  const club = await Club.findOne({
-    _id: id,
-    status: "active",
-  }).populate("ownerId", "username");
+  const clubId = new mongoose.Types.ObjectId(Id);
 
-  if (!club) {
-    return res.status(404).json({ message: "Club not found" });
+  const club = await Club.aggregate([
+    {
+      $match: {
+        _id: clubId,
+        status: "active",
+      },
+    },
+
+    /** 👤 OWNER CHECK */
+    {
+      $addFields: {
+        isOwner: {
+          $eq: ["$owner.id", userId],
+        },
+      },
+    },
+
+    /** 👥 MEMBERSHIP (member OR admin) */
+    {
+      $lookup: {
+        from: "clubMemberships",
+        let: { clubId: "$_id", userId },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ["$clubId", "$$clubId"] },
+                  { $eq: ["$userId", "$$userId"] },
+                  { $in: ["$role", ["member", "admin"]] },
+                  { $eq: ["$status", "active"] },
+                ],
+              },
+            },
+          },
+          { $limit: 1 },
+        ],
+        as: "membership",
+      },
+    },
+
+    /** 📨 JOIN REQUEST */
+    {
+      $lookup: {
+        from: "clubjoinrequests",
+        let: { clubId: "$_id", userId },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ["$clubId", "$$clubId"] },
+                  { $eq: ["$userId", "$$userId"] },
+                  { $eq: ["$status", "pending"] },
+                ],
+              },
+            },
+          },
+          { $limit: 1 },
+        ],
+        as: "joinRequest",
+      },
+    },
+
+    /** 🧠 FINAL FLAGS */
+    {
+      $addFields: {
+        isMember: {
+          $or: [
+            "$isOwner",
+            { $gt: [{ $size: "$membership" }, 0] },
+          ],
+        },
+        hasRequested: {
+          $and: [
+            { $not: "$isOwner" },
+            { $eq: [{ $size: "$membership" }, 0] },
+            { $gt: [{ $size: "$joinRequest" }, 0] },
+          ],
+        },
+      },
+    },
+
+    /** 🧹 CLEANUP */
+    {
+      $project: {
+        membership: 0,
+        joinRequest: 0,
+        isOwner: 0,
+        __v: 0,
+      },
+    },
+  ]);
+
+  if (!club.length) {
+    return res.status(404).json({
+      success: false,
+      message: "Club not found",
+    });
   }
 
-  res.status(200).json({ data: club });
+  return res.status(200).json({
+    success: true,
+    data: club[0],
+  });
 };
+
+
 
 export const getClubByUserId = async (req, res) => {
   try {
@@ -403,13 +555,37 @@ export const changeClubStatus = async (req, res) => {
 /* =====================================================
    STATS
 ===================================================== */
-
 export const getClubStats = async (req, res) => {
-  const club = await Club.findOne({ clubId: req.params.clubId }).select(
-    "membersCount postsCount createdAt"
+  const { clubId } = req.params;
+
+  if (!clubId) {
+    throw new ApiError(400, "clubId is required");
+  }
+
+  const club = await Club.findOne({
+    clubId: clubId.toLowerCase(),
+    status: "active",
+  })
+    .select("membersCount postsCount createdAt")
+    .lean();
+
+  if (!club) {
+    throw new ApiError(404, "Club not found");
+  }
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        membersCount: club.membersCount,
+        postsCount: club.postsCount,
+        createdAt: club.createdAt,
+      },
+      "Club stats fetched successfully"
+    )
   );
-  res.status(200).json({ data: club });
 };
+
 
 export const getInstitutionClubStats = async (req, res) => {
   const count = await Club.countDocuments({

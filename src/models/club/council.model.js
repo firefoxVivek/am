@@ -1,18 +1,18 @@
 import mongoose from "mongoose";
 
-const ClubSchema = new mongoose.Schema(
+const CouncilSchema = new mongoose.Schema(
   {
     /**
-     * 👤 OWNER DATA
+     * 🔐 OWNER (source of truth + snapshot)
      */
     owner: {
       id: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
         required: true,
-        unique: true, // Only one club per user
+        index: true,
       },
-      displayName: {
+      name: {
         type: String,
         required: true,
         trim: true,
@@ -20,68 +20,67 @@ const ClubSchema = new mongoose.Schema(
     },
 
     /**
-     * 🆔 CLUB IDENTIFIER
-     * Unique index is defined at the bottom to support case-insensitivity
+     * 🆔 COUNCIL HANDLE (unique, instagram-like)
      */
-    clubId: {
+    councilId: {
       type: String,
       required: true,
+      unique: true,
       trim: true,
       lowercase: true,
       match: /^[a-z0-9._]+$/,
+      index: true,
     },
 
-    clubName: {
+    /**
+     * 🏷️ DISPLAY NAME
+     */
+    councilName: {
       type: String,
       required: true,
       trim: true,
-      maxlength: 100,
+      maxlength: 120,
     },
 
+    /**
+     * 🖼️ PROFILE IMAGE
+     */
     image: {
       type: String,
       trim: true,
       default: null,
     },
 
+    /**
+     * 📝 ABOUT / DESCRIPTION
+     */
     about: {
       type: String,
       trim: true,
-      maxlength: 1000,
+      maxlength: 1500,
       default: "",
     },
 
     /**
-     * 🏛️ COUNCIL & INSTITUTION (snapshot + ref)
+     * 🏫 INSTITUTION (snapshot + ref)
      */
-    council: {
-      id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Council",
-        index: true,
-        default: null,
-      },
-      name: {
-        type: String,
-        trim: true,
-        default: null,
-      },
-    },
-
     institution: {
       id: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Institution",
+        required: true,
         index: true,
-        default: null,
       },
       name: {
         type: String,
+        required: true,
         trim: true,
-        default: null,
       },
     },
 
+    /**
+     * 🛡️ PRIVACY
+     */
     privacy: {
       type: String,
       enum: ["public", "private", "invite_only"],
@@ -89,6 +88,9 @@ const ClubSchema = new mongoose.Schema(
       index: true,
     },
 
+    /**
+     * ⚙️ STATUS
+     */
     status: {
       type: String,
       enum: ["active", "suspended", "deleted"],
@@ -96,17 +98,23 @@ const ClubSchema = new mongoose.Schema(
       index: true,
     },
 
-    membersCount: {
+    /**
+     * 📊 COUNTERS (cached)
+     */
+    clubsCount: {
       type: Number,
       default: 0,
       index: true,
     },
 
-    postsCount: {
+    membersCount: {
       type: Number,
       default: 0,
     },
 
+    /**
+     * 🔧 SYSTEM METADATA
+     */
     createdBySystem: {
       type: Boolean,
       default: false,
@@ -116,34 +124,20 @@ const ClubSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
-
-/* -------------------------------------------------------------------------- */
-/* INDEXES                                   */
-/* -------------------------------------------------------------------------- */
-
-// 🔍 Text search (feeds, explore, search)
-ClubSchema.index({
-  clubName: "text",
+// 🔍 Search & discovery
+CouncilSchema.index({
+  councilName: "text",
   about: "text",
-  "owner.displayName": "text",
+  "owner.displayname": "text",
   "institution.name": "text",
-  "council.name": "text",
 });
 
- 
-ClubSchema.index({ "council.id": 1, "institution.id": 1 });
-ClubSchema.index({ "institution.id": 1, privacy: 1 });
-ClubSchema.index({ status: 1, privacy: 1 });
+// 🔍 Filtering & browsing
+CouncilSchema.index({ "institution.id": 1, privacy: 1 });
+CouncilSchema.index({ status: 1, privacy: 1 });
 
- 
-ClubSchema.index(
-  { clubId: 1 },
+// 🔐 Case-insensitive uniqueness
+CouncilSchema.index(
+  { councilId: 1 },
   { unique: true, collation: { locale: "en", strength: 2 } }
 );
-
-export const Club = mongoose.model("Club", ClubSchema);
-
- 
-Club.syncIndexes().catch((err) => console.error("Index Sync Error:", err));
-
-export default Club;

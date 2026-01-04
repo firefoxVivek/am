@@ -1,6 +1,6 @@
 import { asynchandler } from "../utils/asynchandler.js";
 import { ApiError } from "../utils/ApiError.js";
-import { User } from "../models/Profile/user.models.js";
+import { User } from "../models/Profile/auth.models.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
  
@@ -25,8 +25,8 @@ const generateAccessAndRefereshTokens = async (userId) => {
   }
 };
 
-export const registerUser = async (req, res) => {
-  const { email, password, role } = req.body;
+  const registerUser = async (req, res) => {
+  const { email, password } = req.body;
 
   /* ---------------- Validation ---------------- */
   if (!email || !password) {
@@ -37,19 +37,20 @@ export const registerUser = async (req, res) => {
     throw new ApiError(400, "Fields cannot be empty");
   }
 
-  /* ---------------- Check existing auth user ---------------- */
-  const existingUser = await User.findOne({ email });
+  /* ---------------- Check existing user ---------------- */
+  const existingUser = await User.findOne({ email }).lean();
 
   if (existingUser) {
     throw new ApiError(409, "User with this email already exists");
   }
 
-  /* ---------------- Create Auth User ---------------- */
+  /* ---------------- Create Pending User ---------------- */
   const authUser = await User.create({
     email,
     password,
-    role: role || "student",
-    status: "pending",
+    role: "user",               // ✅ fixed
+    status: "pending",           // OTP not verified yet
+    isProfileComplete: false,    // username + displayName pending
   });
 
   /* ---------------- Generate OTP ---------------- */
@@ -60,6 +61,7 @@ export const registerUser = async (req, res) => {
     email,
     otp,
     expiresAt,
+   
   });
 
   await signupOtpEmail(email, "OTP for Email Verification", otp);
@@ -71,7 +73,6 @@ export const registerUser = async (req, res) => {
       {
         userId: authUser._id,
         email: authUser.email,
-        role: authUser.role,
         status: authUser.status,
       },
       "Registration successful. Please verify OTP."
@@ -103,8 +104,8 @@ export const registerUser = async (req, res) => {
     throw new ApiError(403, "Invalid OTP");
   }
 
-  /* ---------------- Find Auth User ---------------- */
-  const authUser = await  User.findOne({ email });
+  /* ---------------- Find User ---------------- */
+  const authUser = await User.findOne({ email });
 
   if (!authUser) {
     throw new ApiError(404, "User not found");
@@ -127,6 +128,7 @@ export const registerUser = async (req, res) => {
         userId: authUser._id,
         email: authUser.email,
         status: authUser.status,
+        isProfileComplete: authUser.isProfileComplete,
       },
       "OTP verified successfully"
     )
@@ -150,49 +152,51 @@ const resendOtp = async (req, res) => {
   return res.status(200).json(new ApiResponse(200, "OTP resent successfully"));
 };
 
+ 
+
   const loginUser = asynchandler(async (req, res) => {
   const { email, password } = req.body;
 
-  /* ---------------- Validation ---------------- */
+  // ---------------- Validation ----------------
   if (!email || !password) {
     throw new ApiError(400, "Email and password are required");
   }
 
-  /* ---------------- Find Auth User ---------------- */
-  const authUser = await  User.findOne({ email }).select("+password");
+  // ---------------- Find Auth User ----------------
+  const authUser = await User.findOne({ email }).select("+password");
 
   if (!authUser) {
     throw new ApiError(404, "User does not exist");
   }
 
-  /* ---------------- Status Check ---------------- */
+  // ---------------- Status Check ----------------
   if (authUser.status !== "registered") {
     throw new ApiError(403, "Please verify your email before logging in");
   }
 
-  /* ---------------- Password Check ---------------- */
+  // ---------------- Password Check ----------------
   const isPasswordValid = await authUser.isPasswordCorrect(password);
-
   if (!isPasswordValid) {
     throw new ApiError(401, "Invalid credentials");
   }
 
-  /* ---------------- Generate Tokens ---------------- */
-  const accessToken = authUser.generateAccessToken();
+  // ---------------- Generate Tokens ----------------
+  const accessToken = authUser.generateAccessToken(); // includes username, displayName, role, status, isProfileComplete
   const refreshToken = authUser.generateRefreshToken();
 
+  // ---------------- Save refresh token and last login ----------------
   authUser.refreshToken = refreshToken;
   authUser.lastLoginAt = new Date();
   await authUser.save();
 
-  /* ---------------- Cookies ---------------- */
+  // ---------------- Cookie Options ----------------
   const cookieOptions = {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
   };
 
-  /* ---------------- Response ---------------- */
+  // ---------------- Response ----------------
   return res
     .status(200)
     .cookie("accessToken", accessToken, cookieOptions)
@@ -204,8 +208,11 @@ const resendOtp = async (req, res) => {
           user: {
             _id: authUser._id,
             email: authUser.email,
+            username: authUser.username,
+            displayName: authUser.displayName,
             role: authUser.role,
             status: authUser.status,
+            isProfileComplete: authUser.isProfileComplete,
           },
           accessToken,
           refreshToken,
@@ -215,17 +222,40 @@ const resendOtp = async (req, res) => {
     );
 });
 
-const getAllUsers = asynchandler(async (req, res) => {
-  try {
-    const users = await User.find();
-    if (!users) {
-      res.status(404).json({ error: "No Users Found" });
-    }
-    res.json(users);
-  } catch (err) {
-    res.status(404).json({ error: err });
+// NO verifyJWT here
+const completeProfileAfterOtp = async (req, res) => {
+  const { userId, username, displayName } = req.body;
+
+  if (!userId || !username || !displayName) {
+    throw new ApiError(400, "All fields are required");
   }
-});
+
+  const user = await User.findById(userId);
+
+  if (!user || user.status !== "registered") {
+    throw new ApiError(403, "Invalid user");
+  }
+
+  user.username = username.toLowerCase();
+  user.displayName = displayName;
+  user.isProfileComplete = true;
+
+  await user.save();
+
+  // 🔑 NOW issue tokens
+  const accessToken = user.generateAccessToken();
+  const refreshToken = user.generateRefreshToken();
+
+  user.refreshToken = refreshToken;
+  await user.save({ validateBeforeSave: false });
+
+  return res.json(
+    new ApiResponse(200, { accessToken, refreshToken }, "Profile completed")
+  );
+};
+
+
+ 
 const logoutUser = asynchandler(async (req, res) => {
   await User.findByIdAndUpdate(
     req.user._id,
@@ -323,28 +353,7 @@ const getCurrentUser = asynchandler(async (req, res) => {
     .json(new ApiResponse(200, req.user, "User fetched successfully"));
 });
 
-const updateAccountDetails = asynchandler(async (req, res) => {
-  const { fullName, email } = req.body;
-
-  if (!fullName || !email) {
-    throw new ApiError(400, "All fields are required");
-  }
-
-  const user = await User.findByIdAndUpdate(
-    req.user?._id,
-    {
-      $set: {
-        fullName,
-        email: email,
-      },
-    },
-    { new: true }
-  ).select("-password");
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, user, "Account details updated successfully"));
-});
+ 
 
 const updateUserAvatar = asynchandler(async (req, res) => {
   const avatarLocalPath = req.file?.path;
@@ -406,76 +415,7 @@ const updateUserCoverImage = asynchandler(async (req, res) => {
     .json(new ApiResponse(200, user, "Cover image updated successfully"));
 });
 
-const getUserChannelProfile = asynchandler(async (req, res) => {
-  const { username } = req.params;
-
-  if (!username?.trim()) {
-    throw new ApiError(400, "username is missing");
-  }
-
-  const channel = await User.aggregate([
-    {
-      $match: {
-        username: username?.toLowerCase(),
-      },
-    },
-    {
-      $lookup: {
-        from: "subscriptions",
-        localField: "_id",
-        foreignField: "channel",
-        as: "subscribers",
-      },
-    },
-    {
-      $lookup: {
-        from: "subscriptions",
-        localField: "_id",
-        foreignField: "subscriber",
-        as: "subscribedTo",
-      },
-    },
-    {
-      $addFields: {
-        subscribersCount: {
-          $size: "$subscribers",
-        },
-        channelsSubscribedToCount: {
-          $size: "$subscribedTo",
-        },
-        isSubscribed: {
-          $cond: {
-            if: { $in: [req.user?._id, "$subscribers.subscriber"] },
-            then: true,
-            else: false,
-          },
-        },
-      },
-    },
-    {
-      $project: {
-        fullName: 1,
-        username: 1,
-        subscribersCount: 1,
-        channelsSubscribedToCount: 1,
-        isSubscribed: 1,
-        avatar: 1,
-        coverImage: 1,
-        email: 1,
-      },
-    },
-  ]);
-
-  if (!channel?.length) {
-    throw new ApiError(404, "channel does not exists");
-  }
-
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(200, channel[0], "User channel fetched successfully")
-    );
-});
+ 
 
 export {
   loginUser,
@@ -483,11 +423,10 @@ export {
   refreshAccessToken,
   changeCurrentPassword,
   getCurrentUser,
-  updateAccountDetails,
+ completeProfileAfterOtp,
   updateUserAvatar,
   updateUserCoverImage,
-  getUserChannelProfile,
-  getAllUsers,
+ registerUser,
   verifyOtp,
   resendOtp,
 };
