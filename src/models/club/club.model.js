@@ -2,15 +2,12 @@ import mongoose from "mongoose";
 
 const ClubSchema = new mongoose.Schema(
   {
-    /**
-     * 👤 OWNER DATA
-     */
     owner: {
       id: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
         required: true,
-        unique: true, // Only one club per user
+        // unique: true is handled by the explicit index at the bottom
       },
       displayName: {
         type: String,
@@ -19,10 +16,6 @@ const ClubSchema = new mongoose.Schema(
       },
     },
 
-    /**
-     * 🆔 CLUB IDENTIFIER
-     * Unique index is defined at the bottom to support case-insensitivity
-     */
     clubId: {
       type: String,
       required: true,
@@ -38,90 +31,53 @@ const ClubSchema = new mongoose.Schema(
       maxlength: 100,
     },
 
-    image: {
-      type: String,
-      trim: true,
-      default: null,
-    },
+    image: { type: String, trim: true, default: null },
+    about: { type: String, trim: true, maxlength: 1000, default: "" },
 
-    about: {
-      type: String,
-      trim: true,
-      maxlength: 1000,
-      default: "",
-    },
-
-    /**
-     * 🏛️ COUNCIL & INSTITUTION (snapshot + ref)
-     */
     council: {
-      id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Council",
-        index: true,
-        default: null,
-      },
-      name: {
-        type: String,
-        trim: true,
-        default: null,
-      },
+      id: { type: mongoose.Schema.Types.ObjectId, ref: "Council", default: null },
+      name: { type: String, trim: true, default: null },
     },
 
     institution: {
-      id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Institution",
-        index: true,
-        default: null,
-      },
-      name: {
-        type: String,
-        trim: true,
-        default: null,
-      },
+      id: { type: mongoose.Schema.Types.ObjectId, ref: "Institution", default: null },
+      name: { type: String, trim: true, default: null },
     },
 
     privacy: {
       type: String,
       enum: ["public", "private", "invite_only"],
       default: "public",
-      index: true,
     },
 
     status: {
       type: String,
       enum: ["active", "suspended", "deleted"],
       default: "active",
-      index: true,
     },
 
-    membersCount: {
-      type: Number,
-      default: 0,
-      index: true,
-    },
-
-    postsCount: {
-      type: Number,
-      default: 0,
-    },
-
-    createdBySystem: {
-      type: Boolean,
-      default: false,
-    },
+    membersCount: { type: Number, default: 0 },
+    postsCount: { type: Number, default: 0 },
+    createdBySystem: { type: Boolean, default: false },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
 /* -------------------------------------------------------------------------- */
 /* INDEXES                                   */
 /* -------------------------------------------------------------------------- */
 
-// 🔍 Text search (feeds, explore, search)
+// ⚡ 1. DIRECT OWNER INDEX (For instant lookup via JWT)
+// This ensures "owner.id" is indexed directly at the top level
+ClubSchema.index({ "owner.id": 1 }, { unique: true });
+
+// 🔐 2. Case-insensitive uniqueness for clubId
+ClubSchema.index(
+  { clubId: 1 },
+  { unique: true, collation: { locale: "en", strength: 2 } }
+);
+
+// 🔍 3. Text search
 ClubSchema.index({
   clubName: "text",
   about: "text",
@@ -130,20 +86,14 @@ ClubSchema.index({
   "council.name": "text",
 });
 
- 
-ClubSchema.index({ "council.id": 1, "institution.id": 1 });
-ClubSchema.index({ "institution.id": 1, privacy: 1 });
+// 📊 4. Compound filters for performance
 ClubSchema.index({ status: 1, privacy: 1 });
-
- 
-ClubSchema.index(
-  { clubId: 1 },
-  { unique: true, collation: { locale: "en", strength: 2 } }
-);
+ClubSchema.index({ "council.id": 1, "institution.id": 1 });
+ClubSchema.index({ "institution.id": 1, status: 1 });
 
 export const Club = mongoose.model("Club", ClubSchema);
 
- 
+// Sync indexes to clear old ghost indexes
 Club.syncIndexes().catch((err) => console.error("Index Sync Error:", err));
 
 export default Club;

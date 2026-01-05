@@ -36,7 +36,7 @@ import {
 import { verifyJWT } from "../../middleware/auth.middleware.js";
 import {
   isClubAdmin,
-  isClubOwner,
+  
 } from "../../middleware/clubs/club.middleware.js";
 
 const router = express.Router();
@@ -56,9 +56,9 @@ router.get("/:clubId", getClubByClubId);
 
 router.get("/id/:Id", getClubById);
 
-router.get("/user/:userId", getClubByUserId);
+router.get("/user/myclub", verifyJWT, getClubByUserId);
 
-router.get("/user/:userId", getClubByUserId);
+ 
 
 router.get("/admin/user/:userId/history", getDeletedClubByUserId);
 

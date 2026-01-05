@@ -338,21 +338,49 @@ export const getClubById = async (req, res) => {
 
 
 
-export const getClubByUserId = async (req, res) => {
+/**
+ * @desc    Get the authenticated user's club instantly using indexed owner.id
+ * @route   GET /api/clubs/my-club
+ * @access  Private
+ */
+  export const getClubByUserId = async (req, res) => {
   try {
-    // We add the status filter here
-    const club = await Club.findOne({ 
-      ownerId: req.params.userId,
-      status: { $ne: "deleted" } // "Not Equal to deleted"
-    });
+    // 1. req.user.id comes from your JWT verification middleware
+    const userId = req.user._id;
 
-    if (!club) {
-      return res.status(404).json({ message: "Club not found or has been deactivated" });
+    if (!userId) {
+      return res.status(401).json({ 
+        success: false, 
+        message: "Unauthorized: No user ID found in token" 
+      });
     }
 
-    res.status(200).json({ data: club });
+    // 2. Query using the exact indexed path "owner.id"
+    // .lean() provides a huge speed boost for read-only queries
+    const club = await Club.findOne({ 
+      "owner.id": userId, 
+      status: { $ne: "deleted" } 
+    }).lean();
+    
+    // 3. Instant return
+    if (!club) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "No active club found for this user." 
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: club
+    });
+
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("Error in getMyClub:", error);
+    return res.status(500).json({ 
+      success: false, 
+      message: "Internal Server Error" 
+    });
   }
 };
 
@@ -414,7 +442,7 @@ export const searchClubs = async (req, res) => {
       page = 1,
       limit = 10
     } = req.query;
-    console.log("Search query:",q );
+ 
     if (!q || q.trim().length < 2) {
       return res.status(400).json({
         message: "Search query must be at least 2 characters"

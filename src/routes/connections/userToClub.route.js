@@ -10,7 +10,7 @@ import {
   removeAdmin,
   removeMember,
   getClubMembers,
-  getPendingJoinRequests,
+  getPendingClubJoinRequests,
   getMyClubs,
   getClubMemberCount,
   getMyRoleInClub,
@@ -33,7 +33,7 @@ router.post("/member/:membershipId/remove", removeMember);
 
 router.get("/:clubId/members", getClubMembers);
 
-router.get("/:clubId/requests/pending", getPendingJoinRequests);
+router.get("/:clubId/requests/pending", getPendingClubJoinRequests);
 
 router.get("/:clubId/members/count", getClubMemberCount);
 

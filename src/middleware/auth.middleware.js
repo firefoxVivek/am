@@ -15,7 +15,7 @@ export const verifyJWT = asynchandler(async (req, _, next) => {
 
     // Verify JWT signature and expiration
     const decodedToken = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
-console.log("Decoded Token:", decodedToken);
+ 
     // Attach decoded token payload directly to request
     req.user = {
       _id: decodedToken._id,

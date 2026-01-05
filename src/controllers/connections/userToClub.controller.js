@@ -342,13 +342,62 @@ export const getClubMembers = async ({ clubId, page = 1, limit = 20 }) => {
 /* ======================================================
    GET PENDING JOIN REQUESTS
 ====================================================== */
-export const getPendingJoinRequests = async (clubId) => {
-  return ClubMembership.find({
-    clubId,
-    status: "pending",
-  })
-    .populate("userId", "username avatar")
-    .sort({ createdAt: -1 });
+ 
+ 
+export const getPendingClubJoinRequests = async (req, res) => {
+  try {
+    const { clubId } = req.params;
+    const userId = req.user._id;
+
+    if (!mongoose.Types.ObjectId.isValid(clubId)) {
+      return res.status(400).json({
+        message: "Invalid clubId",
+      });
+    }
+
+    /**
+     * 1️⃣ Check if requester is owner or admin of the club
+     */
+    const requesterMembership = await ClubMembership.findOne({
+      clubId,
+      userId,
+      status: "approved",
+      role: { $in: ["owner", "admin"] },
+    }).select("_id role");
+
+    if (!requesterMembership) {
+      return res.status(403).json({
+        message: "You are not authorized to view join requests",
+      });
+    }
+
+    /**
+     * 2️⃣ Fetch pending join requests
+     */
+    const pendingRequests = await ClubMembership.find({
+      clubId,
+      status: "pending",
+    })
+      .populate("userId", "username avatar")
+      .select(
+        "userId requestedAt createdAt"
+      )
+      .sort({ createdAt: -1 })
+      .lean();
+
+    /**
+     * 3️⃣ Response
+     */
+    return res.status(200).json({
+      count: pendingRequests.length,
+      data: pendingRequests,
+    });
+  } catch (error) {
+    console.error("Error fetching pending join requests:", error);
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
 };
 
 /* ======================================================
