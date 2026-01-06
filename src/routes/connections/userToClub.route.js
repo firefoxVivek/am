@@ -9,9 +9,9 @@ import {
   promoteToAdmin,
   removeAdmin,
   removeMember,
-  getClubMembers,
+  getClubMembersOnly,
   getPendingClubJoinRequests,
-  getMyClubs,
+  getMyClubs,getClubAdminsOnly,
   getClubMemberCount,
   getMyRoleInClub,
 } from "../../controllers/connections/userToClub.controller.js";
@@ -31,7 +31,8 @@ router.post("/member/:membershipId/promote", promoteToAdmin);
 router.post("/admin/:membershipId/remove", removeAdmin);
 router.post("/member/:membershipId/remove", removeMember);
 
-router.get("/:clubId/members", getClubMembers);
+router.get("/:clubId/members", getClubMembersOnly);
+router.get("/:clubId/admin", getClubAdminsOnly);
 
 router.get("/:clubId/requests/pending", getPendingClubJoinRequests);
 

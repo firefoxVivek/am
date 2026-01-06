@@ -306,39 +306,125 @@ export const removeMember = async (req, res) => {
 /* ======================================================
    GET CLUB MEMBERS (AGGREGATION)
 ====================================================== */
-export const getClubMembers = async ({ clubId, page = 1, limit = 20 }) => {
-  const skip = (page - 1) * limit;
+ 
 
-  return ClubMembership.aggregate([
-    {
-      $match: {
-        clubId: new mongoose.Schema.Types.ObjectId(clubId),
-        status: "approved",
+export const getClubMembersOnly = async (req, res) => {
+  try {
+    const { clubId } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    // Use aggregate to get both data and total count in one go
+    const result = await ClubMembership.aggregate([
+      {
+        $match: {
+          clubId: new mongoose.Types.ObjectId(clubId),
+          status: "approved",
+          role: "member", // Specifically fetching members only
+        },
       },
-    },
-    {
-      $lookup: {
-        from: "users",
-        localField: "userId",
-        foreignField: "_id",
-        as: "user",
+      {
+        $facet: {
+          // Branch 1: Get the actual data
+          metadata: [{ $count: "total" }],
+          data: [
+            {
+              $lookup: {
+                from: "users",
+                localField: "userId",
+                foreignField: "_id",
+                as: "user",
+              },
+            },
+            { $unwind: "$user" },
+            {
+              $project: {
+                role: 1,
+                joinedAt: 1,
+                "user._id": 1,
+                "user.username": 1,
+                "user.profileImage": 1, // Only send necessary fields
+                "user.fullName": 1,
+              },
+            },
+            { $sort: { joinedAt: -1 } },
+            { $skip: skip },
+            { $limit: limit },
+          ],
+        },
       },
-    },
-    { $unwind: "$user" },
-    {
-      $project: {
-        role: 1,
-        joinedAt: 1,
-        "user.password": 0,
-        "user.refreshToken": 0,
+    ]);
+
+    const members = result[0].data;
+    const totalCount = result[0].metadata[0]?.total || 0;
+
+    return res.status(200).json({
+      success: true,
+      data: members,
+      pagination: {
+        totalItems: totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+        currentPage: page,
+        hasNextPage: page * limit < totalCount,
       },
-    },
-    { $sort: { joinedAt: -1 } },
-    { $skip: skip },
-    { $limit: limit },
-  ]);
+    });
+  } catch (error) {
+    console.error("Error fetching club members:", error);
+    return res.status(500).json({ success: false, message: "Server Error" });
+  }
 };
 
+ 
+export const getClubAdminsOnly = async (req, res) => {
+  try {
+    const { clubId } = req.params;
+
+    // We typically don't paginate admins as there are rarely more than 20,
+    // but we filter strictly by administrative roles.
+    const admins = await ClubMembership.aggregate([
+      {
+        $match: {
+          clubId: new mongoose.Types.ObjectId(clubId),
+          status: "approved",
+          // Matches anyone who is an admin OR the owner
+          role: { $in: ["admin", "owner"] }, 
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "userId",
+          foreignField: "_id",
+          as: "user",
+        },
+      },
+      { $unwind: "$user" },
+      {
+        $project: {
+          role: 1,
+          joinedAt: 1,
+          "user._id": 1,
+          "user.username": 1,
+          "user.profileImage": 1,
+          "user.fullName": 1,
+          "user.bio": 1, // Admins often display a bio
+        },
+      },
+      // Sort so Owner appears first, then by join date
+      { $sort: { role: 1, joinedAt: 1 } }, 
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      count: admins.length,
+      data: admins,
+    });
+  } catch (error) {
+    console.error("Error fetching club admins:", error);
+    return res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
 /* ======================================================
    GET PENDING JOIN REQUESTS
 ====================================================== */
