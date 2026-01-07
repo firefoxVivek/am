@@ -46,7 +46,7 @@ app.use("/api/v1/profile", Profile);
 app.use("/api/v1/profile/public", PublicProfile );
 app.use("/api/v1/club", Club);
 app.use("/api/v1/events",Events);
-app.use("/api/v1/events",Days)
+app.use("/api/v1/events/days/",Days)
 app.use("/api/v1/uploads", uploadRoutes);
 app.use("/api/v1/connections",Connections);
 app.use("/api/v1/membership",Membership);

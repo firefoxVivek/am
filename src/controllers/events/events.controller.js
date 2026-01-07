@@ -179,7 +179,42 @@ export const updateEvent = async (req, res) => {
     });
   }
 };
+ 
 
+export const getUpcomingClubEvents = async (req, res) => {
+  try {
+    const { clubId } = req.params;
+
+    // 1. Define the Time Range
+    const now = new Date();
+    const oneMonthFromNow = new Date();
+    oneMonthFromNow.setMonth(now.getMonth() + 1);
+
+    // 2. Fetch events
+    const events = await Event.find({
+      clubId: clubId,
+      status: "published", // Only show live events
+      startDate: {
+        $gte: now,             // Starting from now
+        $lte: oneMonthFromNow  // Until exactly one month later
+      }
+    })
+    .select("_id name startDate endDate venue banner") // Only return these specific fields
+    .sort({ startDate: 1 }); // Sort by soonest first
+
+    return res.status(200).json({
+      success: true,
+      count: events.length,
+      data: events
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching upcoming events",
+      error: error.message
+    });
+  }
+};
 /* ======================================================
    DELETE EVENT (CASCADE DAYS)
 ====================================================== */

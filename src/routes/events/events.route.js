@@ -6,6 +6,7 @@ import {
   updateEvent,
   deleteEvent,
   publishEvent,
+  getUpcomingClubEvents
 } from "../../controllers/events/events.controller.js";
 
 const router = express.Router();
@@ -15,14 +16,14 @@ const router = express.Router();
  */
 
 /* ---------------- Create Event ---------------- */
-router.post("/", createEvent);
+router.post("/create", createEvent);
 
 /* ---------------- Get Events (list / filters) ---------------- */
-router.get("/", getEvents);
+router.get("/club/:clubId", getEvents);
 
 /* ---------------- Get Single Event ---------------- */
 router.get("/:eventId", getEventById);
-
+router.get("/club/:clubId/upcoming",getUpcomingClubEvents);
 /* ---------------- Update Event (partial) ---------------- */
 router.patch("/:eventId", updateEvent);
 
