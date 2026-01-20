@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
- import Event from "../../../models/event/event.model.js";
-import Activity from "../../../models/event/activity/masterday.model.js";
+
+import Activity from "../../../models/event/Activity/masterday.model.js";
 
 /* ======================================================
    CREATE EVENT DAY
