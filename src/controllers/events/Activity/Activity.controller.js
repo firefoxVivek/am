@@ -2,15 +2,12 @@ import mongoose from "mongoose";
 
 import Activity from "../../../models/event/Activity/masterday.model.js";
 
-/* ======================================================
-   CREATE EVENT DAY
-====================================================== */
+
 export const createActivity = async (req, res) => {
   try {
     const { eventId } = req.params;
 
-    // This will now create a NEW document every time 
-    // because we removed the 'unique' constraint in the model.
+
     const newActivityDoc = await Activity.create({
       eventId,
       ...req.body,
@@ -27,9 +24,7 @@ export const createActivity = async (req, res) => {
     });
   }
 };
-/* ======================================================
-   GET ALL DAYS BY EVENT
-====================================================== */
+
 export const getActivity = async (req, res) => {
   try {
     const { eventId } = req.params;
@@ -104,9 +99,7 @@ export const getEventSchedule = async (req, res) => {
     });
   }
 };
-/* ======================================================
-   GET SINGLE EVENT DAY
-====================================================== */
+
 export const getActivityById = async (req, res) => {
   try {
     const { activityId } = req.params;  
@@ -119,11 +112,10 @@ export const getActivityById = async (req, res) => {
       });
     }
 
-    // 2. Fetch the activity
-    // We use .lean() for better performance as we are only reading data
+
     const activity = await Activity.findById(activityId).lean();
 
-    // 3. Check if exists
+
     if (!activity) {
       return res.status(404).json({ 
         success: false, 
@@ -131,7 +123,7 @@ export const getActivityById = async (req, res) => {
       });
     }
 
-    // 4. Return the specific activity data
+
     return res.status(200).json({
       success: true,
       data: activity
