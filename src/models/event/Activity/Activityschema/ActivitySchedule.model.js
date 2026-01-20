@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-export const EventDayScheduleSchema = new mongoose.Schema(
+export const ActivityScheduleSchema = new mongoose.Schema(
   {
     title: {
       type: String,

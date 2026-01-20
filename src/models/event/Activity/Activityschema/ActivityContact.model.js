@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-export const EventDayContactSchema = new mongoose.Schema(
+export const ActivityContactSchema = new mongoose.Schema(
   {
     name: {
       type: String,

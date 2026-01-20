@@ -1,12 +1,12 @@
 import mongoose from "mongoose";
 
-import { EventDayScheduleSchema } from "./daysubschema/eventDaySchedule.model.js";
-import { EventDayAwardSchema } from "./daysubschema/eventDayAward.model.js";
-import { EventDayRuleSchema } from "./daysubschema/eventDayRule.model.js";
-import { EventDayVenueSchema } from "./daysubschema/eventDayVenue.model.js";
-import { EventDayContactSchema } from "./daysubschema/eventDayContact.model.js";
+import { ActivityScheduleSchema } from "./Activityschema/ActivitySchedule.model.js";
+import { ActivityAwardSchema } from "./Activityschema/ActivityAward.model.js";
+import { ActivityRuleSchema } from "./Activityschema/ActivityRule.model.js";
+import { ActivityVenueSchema } from "./Activityschema/ActivityVenue.model.js";
+import { ActivityContactSchema } from "./Activityschema/ActivityContact.model.js";
 
-const EventDaySchema = new mongoose.Schema(
+const ActivitySchema = new mongoose.Schema(
   {
     eventId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -14,7 +14,10 @@ const EventDaySchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-
+    activityName :{
+      type:String,
+      required:true
+    },
     dayNumber: {
       type: Number,
       required: true,
@@ -27,27 +30,27 @@ const EventDaySchema = new mongoose.Schema(
     },
 
     scheduling: {
-      type: [EventDayScheduleSchema],
+      type: [ActivityScheduleSchema],
       default: [],
     },
 
     awardsRecognition: {
-      type: [EventDayAwardSchema],
+      type: [ActivityAwardSchema],
       default: [],
     },
 
     rulesGuidelines: {
-      type: [EventDayRuleSchema],
+      type: [ActivityRuleSchema],
       default: [],
     },
 
     venueLogistics: {
-      type: EventDayVenueSchema,
+      type: ActivityVenueSchema,
       required: true,
     },
 
     contactsSupport: {
-      type: [EventDayContactSchema],
+      type: [ActivityContactSchema],
       default: [],
     },
 
@@ -64,11 +67,10 @@ const EventDaySchema = new mongoose.Schema(
 );
 
 /* ---------------- Indexes ---------------- */
-EventDaySchema.index({ eventId: 1, dayNumber: 1 }, { unique: true });
-EventDaySchema.index({ eventId: 1, date: 1 });
+ActivitySchema.index({ eventId: 1, dayNumber: 1 }, { unique: false });
 
 /* ---------------- Validation ---------------- */
-EventDaySchema.pre("validate", async function (next) {
+ActivitySchema.pre("validate", async function (next) {
   const Event = mongoose.model("Event");
   const event = await Event.findById(this.eventId).select(
     "startDate endDate"
@@ -87,5 +89,5 @@ EventDaySchema.pre("validate", async function (next) {
   next();
 });
 
-export const EventDay = mongoose.model("EventDay", EventDaySchema);
-export default EventDay;
+export const Activity = mongoose.model("Activity", ActivitySchema);
+export default Activity;

@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-export const EventDayVenueSchema = new mongoose.Schema(
+export const ActivityVenueSchema = new mongoose.Schema(
   {
     venueName: {
       type: String,

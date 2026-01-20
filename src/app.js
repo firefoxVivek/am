@@ -36,7 +36,7 @@ import { MCQBlock } from "./models/story/supporterTypes/mcqs.model.js";
 
 import Events from "./routes/events/events.route.js";
 import uploadRoutes from "./routes/others/upload.routes.js";
-import Days from "./routes/events/daywise/day.routes.js";
+import Activity from "./routes/events/daywise/activity.routes.js";
 import Profile from "./routes/profile/profile.routes.js";
 import PublicProfile from "./routes/profile/publicProfile.routes.js";
 import Connections from "./routes/connections/userToUser.route.js";
@@ -46,7 +46,7 @@ app.use("/api/v1/profile", Profile);
 app.use("/api/v1/profile/public", PublicProfile );
 app.use("/api/v1/club", Club);
 app.use("/api/v1/events",Events);
-app.use("/api/v1/events/days/",Days)
+app.use("/api/v1/events/activity/",Activity)
 app.use("/api/v1/uploads", uploadRoutes);
 app.use("/api/v1/connections",Connections);
 app.use("/api/v1/membership",Membership);
