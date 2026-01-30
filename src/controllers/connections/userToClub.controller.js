@@ -509,28 +509,37 @@ export const getUserClubRole = async ({ clubId, userId }) => {
 };
 
 export const getMyClubs = async (req, res) => {
-  const userId = req.user._id;
+  try {
+    const userId = req.user._id;
 
-  const memberships = await ClubMembership.find({
-    user: userId,
-    status: "active",
-  })
-    .populate("club", "name logo category about")
-    .lean();
+    const memberships = await ClubMembership.find({
+      userId: userId,     
+      role: 'member',
+      status: "approved",
+    })
+      .populate("clubId", "name logo category about") 
+      .lean();
 
-  const clubs = memberships.map((m) => ({
-    clubId: m.club._id,
-    name: m.club.name,
-    logo: m.club.logo,
-    category: m.club.category,
-    about: m.club.about,
-    role: m.role,
-    joinedAt: m.createdAt,
-  }));
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, clubs, "My clubs fetched successfully"));
+    const clubs = memberships
+      .filter(m => m.clubId) 
+      .map((m) => ({
+        clubId: m.clubId._id,
+        name: m.clubId.name,
+        logo: m.clubId.logo,
+        category: m.clubId.category,
+        about: m.clubId.about,
+        role: m.role,
+        joinedAt: m.joinedAt || m.createdAt,
+      }));
+
+    return res
+      .status(200)
+      .json(new ApiResponse(200, clubs, "My clubs fetched successfully"));
+  } catch (error) {
+    console.error("Error fetching clubs:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
 };
 
 export const getMyRoleInClub = async (req, res) => {

@@ -10,7 +10,7 @@ import {
     updateUserCoverImage,
 completeProfileAfterOtp,
  
-    
+    updateFcmToken,
     verifyOtp,
     resendOtp
 } from "../../controllers/user.controller.js";
@@ -27,10 +27,9 @@ router.route("/login").post(loginUser)
  
 router.post(
   "/completeprofile",
- 
   completeProfileAfterOtp
 );
-
+router.patch("/deviceToken", verifyJWT, updateFcmToken);
 //secured routes
 router.route("/logout").post(verifyJWT, logoutUser)
 router.route("/refresh-token").post(refreshAccessToken)

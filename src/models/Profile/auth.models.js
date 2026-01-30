@@ -66,13 +66,18 @@ const userSchema = new Schema(
     lastLoginAt: {
       type: Date,
     },
+
+    // ✅ NEW FIELD: Store multiple device tokens for push notifications
+    deviceTokens: {
+      type: [String],
+      default: [],
+    },
   },
   {
     timestamps: true,
   }
 );
 
- 
 // 🔐 Hash password before save
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();

@@ -221,6 +221,25 @@ const resendOtp = async (req, res) => {
       )
     );
 });
+const updateFcmToken = asynchandler(async (req, res) => {
+  const { fcmToken } = req.body;
+
+  if (!fcmToken) {
+    throw new ApiError(400, "FCM token is required");
+  }
+
+  const userId = req.user._id; // assuming auth middleware
+  const user = await User.findById(userId);
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  user.fcmToken = fcmToken;
+  await user.save();
+
+  res.status(200).json(new ApiResponse(200, { fcmToken: user.fcmToken }, "FCM token updated"));
+});
 
 // NO verifyJWT here
 const completeProfileAfterOtp = async (req, res) => {
@@ -424,7 +443,7 @@ export {
   changeCurrentPassword,
   getCurrentUser,
  completeProfileAfterOtp,
-  updateUserAvatar,
+  updateUserAvatar,updateFcmToken,
   updateUserCoverImage,
  registerUser,
   verifyOtp,
