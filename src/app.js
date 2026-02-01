@@ -41,6 +41,9 @@ import Profile from "./routes/profile/profile.routes.js";
 import PublicProfile from "./routes/profile/publicProfile.routes.js";
 import Connections from "./routes/connections/userToUser.route.js";
 import Membership from "./routes/connections/userToClub.route.js";
+import IProfile from "./routes/institution/profile.routes.js";
+import IServices from "./routes/institution/services.routes.js";
+import IBooking from "./routes/institution/booking.routes.js";
 app.use("/api/v1/auth", userRouter);
 app.use("/api/v1/profile", Profile);
 app.use("/api/v1/profile/public", PublicProfile );
@@ -51,6 +54,10 @@ app.use("/api/v1/uploads", uploadRoutes);
 app.use("/api/v1/connections",Connections);
 app.use("/api/v1/membership",Membership);
 app.use("/api/v1/stories", Story);
+
+app.use("/api/v1/institution/profile", IProfile );
+app.use("/api/v1/institution/services", IServices );
+app.use("/api/v1/institution/bookings", IBooking );
 
 app.use(errorHandler);
 export { app };

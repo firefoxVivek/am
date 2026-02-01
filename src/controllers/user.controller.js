@@ -25,13 +25,22 @@ const generateAccessAndRefereshTokens = async (userId) => {
   }
 };
 
-  const registerUser = async (req, res) => {
-  const { email, password } = req.body;
+const registerUser = async (req, res) => {
+  const { email, password, role } = req.body;
 
   /* ---------------- Validation ---------------- */
   if (!email || !password) {
     throw new ApiError(400, "Email and password are required");
   }
+
+  // Define allowed roles for registration
+  const allowedRoles = ["user", "institution", "club"];
+  
+  // Validate role: Default to "user" if not provided, 
+  // but ensure it's one of the allowed roles
+  const assignedRole = role && allowedRoles.includes(role.toLowerCase()) 
+    ? role.toLowerCase() 
+    : "user";
 
   if ([email, password].some((f) => f.trim() === "")) {
     throw new ApiError(400, "Fields cannot be empty");
@@ -48,7 +57,7 @@ const generateAccessAndRefereshTokens = async (userId) => {
   const authUser = await User.create({
     email,
     password,
-    role: "user",               // ✅ fixed
+    role: assignedRole,          // ✅ Now dynamically assigned
     status: "pending",           // OTP not verified yet
     isProfileComplete: false,    // username + displayName pending
   });
@@ -61,7 +70,6 @@ const generateAccessAndRefereshTokens = async (userId) => {
     email,
     otp,
     expiresAt,
-   
   });
 
   await signupOtpEmail(email, "OTP for Email Verification", otp);
@@ -73,6 +81,7 @@ const generateAccessAndRefereshTokens = async (userId) => {
       {
         userId: authUser._id,
         email: authUser.email,
+        role: authUser.role,     // ✅ Return role so frontend knows the flow
         status: authUser.status,
       },
       "Registration successful. Please verify OTP."
@@ -223,22 +232,34 @@ const resendOtp = async (req, res) => {
 });
 const updateFcmToken = asynchandler(async (req, res) => {
   const { fcmToken } = req.body;
+  console.log("FCM Token received:", fcmToken);
 
   if (!fcmToken) {
     throw new ApiError(400, "FCM token is required");
   }
 
-  const userId = req.user._id; // assuming auth middleware
-  const user = await User.findById(userId);
+  const userId = req.user._id;
+
+  // Use findByIdAndUpdate with $addToSet to prevent duplicate tokens in the array
+  const user = await User.findByIdAndUpdate(
+    userId,
+    { 
+      $addToSet: { deviceTokens: fcmToken } 
+    },
+    { new: true }
+  );
 
   if (!user) {
     throw new ApiError(404, "User not found");
   }
 
-  user.fcmToken = fcmToken;
-  await user.save();
-
-  res.status(200).json(new ApiResponse(200, { fcmToken: user.fcmToken }, "FCM token updated"));
+  res.status(200).json(
+    new ApiResponse(
+      200, 
+      { deviceTokens: user.deviceTokens }, 
+      "FCM token updated successfully"
+    )
+  );
 });
 
 // NO verifyJWT here

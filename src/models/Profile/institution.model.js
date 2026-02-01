@@ -1,4 +1,3 @@
-// models/institution.model.js
 import mongoose from "mongoose";
 
 const InstitutionSchema = new mongoose.Schema(
@@ -10,33 +9,40 @@ const InstitutionSchema = new mongoose.Schema(
       index: true,
     },
 
-    councilName: {
-      type: String,
+    // Reference to a Category model (e.g., School, Mall, Barber)
+    categoryId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Category",
+      required: true,
+      index: true,
+    },
+
+    councilName: [
+      {
+        councilId: { type: String, trim: true },
+        name: { type: String, trim: true },
+        _id: false
+      },
+    ],
+
+    // Physical specifics (Landmark, Street, etc.)
+    address: {
+      type: String, 
+      required: true,
       trim: true,
     },
 
-    about: {
-      type: String,
-      maxlength: 2000,
+    // The Geographic Anchor (from your 155k docs)
+    locationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Location", 
+      required: true,
+      index: true, 
     },
 
-    address: {
-      street: String,
-      city: String,
-      state: String,
-      country: String,
-      pincode: String,
-    },
-
-    themes: {
-      type: [String],
-      default: [],
-    },
-
-    services: {
-      type: [String],
-      default: [],
-    },
+    about: { type: String, maxlength: 2000 },
+    themes: [{ type: String }],
+   
 
     founderId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -45,16 +51,12 @@ const InstitutionSchema = new mongoose.Schema(
       index: true,
     },
 
-    foundingYear: {
-      type: Number,
-      min: 1700,
-      max: new Date().getFullYear(),
-    },
-
     logo: String,
     website: String,
     contactEmail: String,
     phone: String,
+    instagram: String,
+    linkedIn: String,
 
     status: {
       type: String,
@@ -66,8 +68,15 @@ const InstitutionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-export const Institution = mongoose.model(
-  "Institution",
-  InstitutionSchema
-);
-export default Institution;
+/* -----------------------------------------------------------
+   INDEXING STRATEGY
+----------------------------------------------------------- */
+
+// 1. For "Generic" area searches: find all shops in 'Asifabad'
+InstitutionSchema.index({ locationId: 1 });
+
+// 2. For "Targeted" searches: find all 'Barbers' in 'Asifabad'
+// This is your Compound Index for high-speed filtering
+InstitutionSchema.index({ categoryId: 1, locationId: 1 });
+
+export const Institution = mongoose.model("Institution", InstitutionSchema);

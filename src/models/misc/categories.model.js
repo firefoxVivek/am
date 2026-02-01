@@ -1,44 +1,67 @@
 import mongoose from "mongoose";
 
-const CategorySchema = new mongoose.Schema(
+const { Schema } = mongoose;
+
+const categorySchema = new Schema(
   {
+    // Display name
     name: {
       type: String,
       required: true,
-      trim: true,
-      unique: true,        // no duplicate categories
-      index: true
+      trim: true
     },
 
+    // URL / API safe identifier
     slug: {
       type: String,
       required: true,
-      lowercase: true,
-      trim: true,
       unique: true,
-      index: true
+      lowercase: true,
+      trim: true
     },
 
+    // Hierarchy
+    level: {
+      type: Number,
+      required: true,
+      min: 1
+    },
+
+    parentId: {
+      type: Schema.Types.ObjectId,
+      ref: "Category",
+      default: null
+    },
+
+    // UI related
+    icon: {
+      type: String,
+      default: null
+    },
+
+    order: {
+      type: Number,
+      default: 0
+    },
+ 
+ 
+
+    // Optional metadata
     description: {
       type: String,
-      trim: true,
-      default: null
+      default: ""
     },
-
-    icon: {
-      type: String, // image url or emoji
-      default: null
-    },
-
-    isActive: {
-      type: Boolean,
-      default: true
-    }
+ 
   },
   {
     timestamps: true
   }
 );
 
-export const Category = mongoose.model("Category", CategorySchema);
-export default Category;
+// Indexes for performance
+categorySchema.index({ parentId: 1 });
+categorySchema.index({ level: 1 });
+ 
+ 
+
+export default mongoose.model("Category", categorySchema);

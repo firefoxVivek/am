@@ -19,18 +19,6 @@ const CouncilSchema = new mongoose.Schema(
       },
     },
 
-    /**
-     * 🆔 COUNCIL HANDLE (unique, instagram-like)
-     */
-    councilId: {
-      type: String,
-      required: true,
-      unique: true,
-      trim: true,
-      lowercase: true,
-      match: /^[a-z0-9._]+$/,
-      index: true,
-    },
 
     /**
      * 🏷️ DISPLAY NAME
@@ -67,7 +55,7 @@ const CouncilSchema = new mongoose.Schema(
     institution: {
       id: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "Institution",
+        ref: "User",
         required: true,
         index: true,
       },
