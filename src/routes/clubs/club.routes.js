@@ -27,9 +27,8 @@ import {
   //   changeClubStatus,
   getClubStats,
   //   getInstitutionClubStats,
-  getMyClub,
-  getMyJoinedClubs,
-  getMyAdminClubs,
+ getMyClubs,
+  
   uploadClubImage,
 } from "../../controllers/clubs/club.controller.js";
 
@@ -76,9 +75,7 @@ router.patch("/:clubId/privacy", verifyJWT, isClubAdmin, changeClubPrivacy);
 
 router.get("/:clubId/stats", verifyJWT, getClubStats);
 
-router.get("/me/joined", verifyJWT, getMyJoinedClubs);
-
-router.get("/me/admin", verifyJWT, getMyAdminClubs);
+router.get("/my/clubs", verifyJWT, getMyClubs);
 
 router.post("/:clubId/image", verifyJWT, isClubAdmin, uploadClubImage);
 

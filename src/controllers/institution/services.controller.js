@@ -1,26 +1,71 @@
 
+import admin from "../../../config/firebase.js";
 import ServiceCard from "../../models/institution/serviceCard.model.js";
+import { Institution } from "../../models/Profile/institution.model.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { asynchandler } from "../../utils/asynchandler.js";
 
 /* --- Create a New Service Card --- */
 export const createServiceCard = asynchandler(async (req, res) => {
-  const { title, about, imageUrl, customFields, itemsList } = req.body;
-
-  if (!title) throw new ApiError(400, "Title is required");
-
-  const serviceCard = await ServiceCard.create({
-    providerId: req.user._id, // Set from Auth Middleware
+  const {
     title,
     about,
     imageUrl,
     customFields,
-    itemsList
+    itemsList,
+    institutionId
+  } = req.body;
+
+  if (!title) {
+    throw new ApiError(400, "Title is required");
+  }
+
+  if (!institutionId) {
+    throw new ApiError(400, "Institution ID is required");
+  }
+
+  // 1️⃣ Ensure institution exists
+  const institution = await Institution.findById(institutionId).select("_id name");
+
+  if (!institution) {
+    throw new ApiError(404, "Institution not found");
+  }
+
+  // 2️⃣ Create service card
+  const serviceCard = await ServiceCard.create({
+    providerId: req.user._id, // Authenticated user
+    institutionId,
+    title,
+    about,
+    imageUrl,
+    customFields,
+    itemsList,
+  });
+
+  // 3️⃣ Prepare FCM topic
+  const topic = `ins_${institutionId}`;
+
+  // 4️⃣ Send notification to institution subscribers
+  await admin.messaging().send({
+    topic,
+    notification: {
+      title: `New update from ${institution.name}`,
+      body: title,
+    },
+    data: {
+      type: "SERVICE_CREATED",
+      serviceId: serviceCard._id.toString(),
+      institutionId: institutionId.toString(),
+    },
   });
 
   return res.status(201).json(
-    new ApiResponse(201, serviceCard, "Service Card created successfully")
+    new ApiResponse(
+      201,
+      serviceCard,
+      "Service Card created and notification sent successfully"
+    )
   );
 });
 

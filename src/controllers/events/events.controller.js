@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Event from "../../models/event/event.model.js";
 import EventDay from "../../models/event/Activity/masterday.model.js";
+import admin from "../../../config/firebase.js";
 
 /* ======================================================
    CREATE EVENT
@@ -9,9 +10,7 @@ export const createEvent = async (req, res) => {
   try {
     const payload = req.body;
 
-    if (
-      new Date(payload.startDate) > new Date(payload.endDate)
-    ) {
+    if (new Date(payload.startDate) > new Date(payload.endDate)) {
       return res.status(400).json({
         message: "Start date cannot be after end date",
       });
@@ -27,7 +26,37 @@ export const createEvent = async (req, res) => {
       });
     }
 
+    /* ---------------- Create Event ---------------- */
     const event = await Event.create(payload);
+
+    /* ---------------- Notify Club Members ---------------- */
+    if (payload.clubId) {
+      const topic = `club_${payload.clubId}`;
+
+      // 🔍 DEBUG LOG
+      console.log("📣 FCM EVENT TOPIC:", topic);
+
+      try {
+        await admin.messaging().send({
+          topic,
+          notification: {
+            title: "New Event 📅",
+            body: `${event.name || "A new event"} has been announced`,
+          },
+          data: {
+            eventId: event._id.toString(),
+            clubId: payload.clubId.toString(),
+            type: "CLUB_EVENT_CREATED",
+          },
+        });
+      } catch (err) {
+        console.error(
+          "❌ FCM event notify failed:",
+          err.code,
+          err.message
+        );
+      }
+    }
 
     return res.status(201).json({
       message: "Event created successfully",

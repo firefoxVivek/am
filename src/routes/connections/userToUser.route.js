@@ -7,7 +7,7 @@ import {
   cancelFriendRequest,
   removeFriend,
   getMyFriends,
-  getIncomingRequests,
+  getIncomingRequests, 
   getOutgoingRequests,
   getFriendshipStatus,
   getFriendCount,
@@ -22,6 +22,7 @@ router.post("/accept/:requestId", acceptFriendRequest);
 router.post("/reject/:requestId", rejectFriendRequest);
 router.delete("/cancel/:requestId", cancelFriendRequest);
 router.delete("/remove/:userId", removeFriend);
+ 
 
  
 router.get("/my", getMyFriends);

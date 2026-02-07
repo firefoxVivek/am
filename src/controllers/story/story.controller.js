@@ -1,45 +1,60 @@
+import admin from "../../../config/firebase.js";
 import BlockBase from "../../models/story/block.model.js";
 import Story from "../../models/story/masterStory.model.js";
 
 export const createStory = async (req, res) => {
   try {
-    const { title, userId, image, blocks } = req.body;
+    const userId = req.user._id; // ✅ FROM JWT
+    const { title, image, blocks } = req.body;
 
-    if (!title || !userId) {
-      return res
-        .status(400)
-        .json({ message: "title and userId are required" });
+    if (!title) {
+      return res.status(400).json({
+        message: "title is required",
+      });
     }
 
-    // ❗ Remove this block if multiple stories per user are allowed
-    const existing = await Story.findOne({ userId });
-    if (existing) {
-      return res
-        .status(409)
-        .json({ message: "A story already exists for this user." });
-    }
-
+    // Map blocks using discriminators
     const mappedBlocks = blocks?.map((block) => {
       const BlockModel = BlockBase.discriminators?.[block.type];
-
       if (!BlockModel) {
         throw new Error(`Invalid block type: ${block.type}`);
       }
-
       return new BlockModel(block);
     });
 
     const story = new Story({
       title,
       userId,
-      // image is optional → only set if provided
       ...(image && { image }),
       blocks: mappedBlocks || [],
     });
 
-    const saved = await story.save();
+    const savedStory = await story.save();
 
-    res.status(201).json({ data: saved });
+    /* ----------------------------------
+       🔔 SEND FCM TO USER TOPIC
+       Friends are already subscribed
+    ---------------------------------- */
+
+    const topic = `user_${userId}`;
+
+    // Fire-and-forget (never block API response)
+    admin.messaging().send({
+      topic,
+      notification: {
+        title: "New Story Posted 📖",
+        body: `${req.user.displayName || "Your friend"} posted a new story`,
+      },
+      data: {
+        type: "NEW_STORY",
+        storyId: savedStory._id.toString(),
+        userId: userId.toString(),
+      },
+    }).catch((err) => {
+      console.error("FCM topic send failed:", err.message);
+    });
+
+    return res.status(201).json({ data: savedStory });
   } catch (err) {
     console.error(err);
 
@@ -49,9 +64,10 @@ export const createStory = async (req, res) => {
       });
     }
 
-    res.status(500).json({ message: err.message });
+    return res.status(500).json({ message: err.message });
   }
 };
+
 
  
 export const getStoryByStoryId = async (req, res) => {

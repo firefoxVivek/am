@@ -4,6 +4,9 @@ import { ClubMembership } from "../../models/connections/userToClub.model.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 
+import User from "../../models/Profile/auth.models.js";
+import admin from "../../../config/firebase.js";
+
 export const createClub = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -13,18 +16,14 @@ export const createClub = async (req, res) => {
     const ownerName = req.user.displayName;
 
     if (!ownerName) {
-      throw new ApiError(400, "Complete your profile before creating a club");
+      throw new ApiError(
+        400,
+        "Add Name to your profile before creating a club"
+      );
     }
 
-    const {
-      clubId,
-      clubName,
-      image,
-      about,
-      council,
-      institution,
-      privacy,
-    } = req.body;
+    const { clubId, clubName, image, about, council, institution, privacy } =
+      req.body;
 
     /* ---------------- Validation ---------------- */
     if (!clubId || !clubName) {
@@ -34,10 +33,7 @@ export const createClub = async (req, res) => {
     /* ---------------- Uniqueness Check ---------------- */
     const existingClub = await Club.findOne(
       {
-        $or: [
-          { clubId: clubId.toLowerCase() },
-          { "owner.id": ownerId },
-        ],
+        $or: [{ clubId: clubId.toLowerCase() }, { "owner.id": ownerId }],
       },
       null,
       { session }
@@ -56,22 +52,18 @@ export const createClub = async (req, res) => {
         {
           owner: {
             id: ownerId,
-            displayName: ownerName, // ✅ CORRECT FIELD
+            displayName: ownerName,
           },
-
           clubId: clubId.toLowerCase(),
           clubName,
           image: image || null,
           about: about || "",
-
           council: council?.id
             ? { id: council.id, name: council.name || null }
             : null,
-
           institution: institution?.id
             ? { id: institution.id, name: institution.name || null }
             : null,
-
           privacy: privacy || "public",
           membersCount: 1,
           postsCount: 0,
@@ -86,7 +78,7 @@ export const createClub = async (req, res) => {
         {
           clubId: club._id,
           userId: ownerId,
-          role: "owner",       // 🔥 OWNER ROLE
+          role: "owner",
           status: "approved",
           joinedAt: new Date(),
         },
@@ -94,12 +86,28 @@ export const createClub = async (req, res) => {
       { session }
     );
 
+    /* ---------------- FCM Topic Subscription ---------------- */
+    const owner = await User.findById(ownerId)
+      .select("deviceTokens")
+      .session(session);
+
+    const tokens = owner?.deviceTokens || [];
+
+    if (tokens.length > 0) {
+      const adminTopic = `admin_${club.clubId}`;
+      const clubTopic = `club_${club.clubId}`;
+
+      await admin.messaging().subscribeToTopic(tokens, adminTopic);
+      await admin.messaging().subscribeToTopic(tokens, clubTopic);
+    }
+
+    /* ---------------- Commit ---------------- */
     await session.commitTransaction();
     session.endSession();
 
-    return res.status(201).json(
-      new ApiResponse(201, club, "Club created successfully")
-    );
+    return res
+      .status(201)
+      .json(new ApiResponse(201, club, "Club created successfully"));
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
@@ -127,7 +135,6 @@ export const updateClub = async (req, res) => {
   }
 };
 
- 
 export const deleteClub = async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -141,7 +148,7 @@ export const deleteClub = async (req, res) => {
       { clubId, status: { $ne: "deleted" } },
       {
         status: "deleted",
-        clubId: `${clubId}_deleted_${Date.now()}`
+        clubId: `${clubId}_deleted_${Date.now()}`,
       },
       { new: true, session }
     );
@@ -157,7 +164,7 @@ export const deleteClub = async (req, res) => {
     await User.findByIdAndUpdate(
       club.ownerId,
       {
-        $unset: { ownedClub: "" } // or clubId / clubOwned
+        $unset: { ownedClub: "" }, // or clubId / clubOwned
       },
       { session }
     );
@@ -165,7 +172,7 @@ export const deleteClub = async (req, res) => {
     await session.commitTransaction();
 
     res.status(200).json({
-      message: "Club deleted successfully. User can create a new club."
+      message: "Club deleted successfully. User can create a new club.",
     });
   } catch (error) {
     await session.abortTransaction();
@@ -175,7 +182,6 @@ export const deleteClub = async (req, res) => {
     session.endSession();
   }
 };
-
 
 export const checkClubIdAvailability = async (req, res) => {
   const { clubId } = req.params;
@@ -214,7 +220,6 @@ export const getClubByClubId = async (req, res) => {
     },
   });
 };
-
 
 export const getClubById = async (req, res) => {
   const { Id } = req.params;
@@ -297,10 +302,7 @@ export const getClubById = async (req, res) => {
     {
       $addFields: {
         isMember: {
-          $or: [
-            "$isOwner",
-            { $gt: [{ $size: "$membership" }, 0] },
-          ],
+          $or: ["$isOwner", { $gt: [{ $size: "$membership" }, 0] }],
         },
         hasRequested: {
           $and: [
@@ -336,63 +338,66 @@ export const getClubById = async (req, res) => {
   });
 };
 
-
-
-/**
- * @desc    Get the authenticated user's club instantly using indexed owner.id
- * @route   GET /api/clubs/my-club
- * @access  Private
- */
-  export const getClubByUserId = async (req, res) => {
+ 
+export const getClubByUserId = async (req, res) => {
   try {
-    // 1. req.user.id comes from your JWT verification middleware
     const userId = req.user._id;
 
     if (!userId) {
-      return res.status(401).json({ 
-        success: false, 
-        message: "Unauthorized: No user ID found in token" 
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized: No user ID found in token",
       });
     }
 
-    // 2. Query using the exact indexed path "owner.id"
-    // .lean() provides a huge speed boost for read-only queries
-    const club = await Club.findOne({ 
-      "owner.id": userId, 
-      status: { $ne: "deleted" } 
-    }).lean();
-    
-    // 3. Instant return
+    const club = await Club.findOne({
+      "owner.id": userId,
+      status: { $ne: "deleted" },
+    })
+      .select("clubName image owner") // only required fields
+      .lean();
+
     if (!club) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "No active club found for this user." 
+      return res.status(404).json({
+        success: false,
+        message: "No active club found for this user.",
       });
     }
 
-    return res.status(200).json({
-      success: true,
-      data: club
-    });
+    // 🔥 Format like getMyClubs (but single object)
+    const formattedClub = {
+      _id: club._id,
+      clubName: club.clubName,
+      clubImage: club.image || DEFAULT_CLUB_IMAGE,
+      myRole: "owner", // since this API is based on owner.id
+    };
+
+    return res
+      .status(200)
+      .json(new ApiResponse(200, formattedClub, "Club fetched successfully"));
 
   } catch (error) {
-    console.error("Error in getMyClub:", error);
-    return res.status(500).json({ 
-      success: false, 
-      message: "Internal Server Error" 
+    console.error("Error in getClubByUserId:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
     });
   }
 };
 
+
 // This API finds the club regardless of its status
 export const getDeletedClubByUserId = async (req, res) => {
   try {
-    const club = await Club.findOne({ 
+    const club = await Club.findOne({
       ownerId: req.params.userId,
-      status: "deleted" 
+      status: "deleted",
     });
 
-    if (!club) return res.status(404).json({ message: "No deleted club found for this user" });
+    if (!club)
+      return res
+        .status(404)
+        .json({ message: "No deleted club found for this user" });
 
     res.status(200).json({ data: club });
   } catch (error) {
@@ -435,17 +440,12 @@ export const getClubsByInstitution = async (req, res) => {
 };
 
 export const searchClubs = async (req, res) => {
- 
   try {
-    const {
-      q,
-      page = 1,
-      limit = 10
-    } = req.query;
- 
+    const { q, page = 1, limit = 10 } = req.query;
+
     if (!q || q.trim().length < 2) {
       return res.status(400).json({
-        message: "Search query must be at least 2 characters"
+        message: "Search query must be at least 2 characters",
       });
     }
 
@@ -456,11 +456,9 @@ export const searchClubs = async (req, res) => {
     const [clubs, total] = await Promise.all([
       Club.find({
         clubId: regex,
-        status: "active"
+        status: "active",
       })
-        .select(
-          "clubId clubName image about membersCount createdAt"
-        )
+        .select("clubId clubName image about membersCount createdAt")
         .sort({ membersCount: -1, createdAt: -1 })
         .skip(skip)
         .limit(Number(limit))
@@ -468,8 +466,8 @@ export const searchClubs = async (req, res) => {
 
       Club.countDocuments({
         clubName: regex,
-        status: "active"
-      })
+        status: "active",
+      }),
     ]);
 
     res.status(200).json({
@@ -478,15 +476,14 @@ export const searchClubs = async (req, res) => {
         page: Number(page),
         limit: Number(limit),
         total,
-        totalPages: Math.ceil(total / limit)
-      }
+        totalPages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
     console.error("Pattern search error:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
-
 
 export const discoverClubs = async (req, res) => {
   const filter = { status: "active", privacy: "public" };
@@ -614,7 +611,6 @@ export const getClubStats = async (req, res) => {
   );
 };
 
-
 export const getInstitutionClubStats = async (req, res) => {
   const count = await Club.countDocuments({
     institutionId: req.params.institutionId,
@@ -631,10 +627,33 @@ export const getMyClub = async (req, res) => {
   res.status(200).json({ data: club });
 };
 
-export const getMyJoinedClubs = async (req, res) => {
-  const clubs = await Club.find({ members: req.user._id });
-  res.status(200).json({ data: clubs });
-};
+export const getMyClubs =  (async (req, res) => {
+  const userId = req.user._id;
+
+  const memberships = await ClubMembership.find({
+    userId,
+    status: "approved",
+    role: { $in: ["admin", "member"] },
+  })
+    .populate({
+      path: "clubId",
+      select: "clubName image", // only what we need
+    })
+    .lean();
+
+  const clubs = memberships
+    .filter((m) => m.clubId)
+    .map((m) => ({
+      _id: m.clubId._id,
+      clubName: m.clubId.clubName,
+      clubImage: m.clubId.image || DEFAULT_CLUB_IMAGE,
+      myRole: m.role,
+    }));
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, clubs, "Clubs fetched successfully"));
+});
 
 export const getMyAdminClubs = async (req, res) => {
   const clubs = await Club.find({ admins: req.user._id });

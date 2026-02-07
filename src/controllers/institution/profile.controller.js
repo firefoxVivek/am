@@ -1,4 +1,5 @@
  
+import admin from "../../../config/firebase.js";
 import User from "../../models/Profile/auth.models.js";
 import { Institution } from "../../models/Profile/institution.model.js";
 import { ApiError } from "../../utils/ApiError.js";
@@ -52,7 +53,7 @@ export const createInstitution = asynchandler(async (req, res) => {
  export const getMyInstitution = asynchandler(async (req, res) => {
   const institution = await Institution.findOne({ founderId: req.user._id })
     // .populate("categoryId", "name") // Useful for showing category name in UI
-    // .populate("locationId", "officeName pincode districtName");
+    .populate("locationId", "officeName pincode districtName");
 
   if (!institution) {
     throw new ApiError(404, "Institution profile not found.");
@@ -94,5 +95,105 @@ export const updateInstitution = asynchandler(async (req, res) => {
 
   return res.status(200).json(
     new ApiResponse(200, institution, "Profile updated successfully.")
+  );
+});
+export const subscribeToInstitution = asynchandler(async (req, res) => {
+  const userId = req.user._id;
+  const { institutionId } = req.params;
+
+  // 1️⃣ Fetch user + institution
+  const [user, institution] = await Promise.all([
+    User.findById(userId).select("deviceTokens"),
+    Institution.findById(institutionId),
+  ]);
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  if (!institution) {
+    throw new ApiError(404, "Institution not found");
+  }
+
+  if (!user.deviceTokens || user.deviceTokens.length === 0) {
+    throw new ApiError(400, "No device tokens found for user");
+  }
+
+  // 2️⃣ Topic name
+  const topic = `ins_${institutionId}`;
+
+  // 3️⃣ Subscribe all user devices to topic
+  await admin.messaging().subscribeToTopic(
+    user.deviceTokens,
+    topic
+  );
+
+  // 4️⃣ Increment subscribers count (atomic)
+  await Institution.findByIdAndUpdate(
+    institutionId,
+    { $inc: { subscribersCount: 1 } },
+    { new: true }
+  );
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      { topic },
+      "User subscribed to institution successfully"
+    )
+  );
+});
+
+export const unsubscribeFromInstitution = asynchandler(async (req, res) => {
+  const userId = req.user._id;
+  const { institutionId } = req.params;
+
+  // 1️⃣ Fetch user & institution
+  const [user, institution] = await Promise.all([
+    User.findById(userId).select("deviceTokens"),
+    Institution.findById(institutionId),
+  ]);
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  if (!institution) {
+    throw new ApiError(404, "Institution not found");
+  }
+
+  if (!user.deviceTokens || user.deviceTokens.length === 0) {
+    throw new ApiError(400, "No device tokens found for user");
+  }
+
+  const topic = `insti_${institutionId}`;
+
+  // 2️⃣ Unsubscribe all user devices from topic
+  await admin.messaging().unsubscribeFromTopic(
+    user.deviceTokens,
+    topic
+  );
+
+  // 3️⃣ Safely decrement subscriber count (never below 0)
+  await Institution.findByIdAndUpdate(
+    institutionId,
+    {
+      $inc: { subscribersCount: -1 },
+    },
+    { new: true }
+  );
+
+  // Optional safety clamp (extra protection)
+  await Institution.updateOne(
+    { _id: institutionId, subscribersCount: { $lt: 0 } },
+    { $set: { subscribersCount: 0 } }
+  );
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      { topic },
+      "User unsubscribed from institution successfully"
+    )
   );
 });

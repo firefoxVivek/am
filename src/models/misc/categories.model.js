@@ -64,4 +64,4 @@ categorySchema.index({ level: 1 });
  
  
 
-export default mongoose.model("Category", categorySchema);
+export const Category =  mongoose.model("Category", categorySchema);

@@ -3,6 +3,8 @@ import { Club } from "../../models/club/club.model.js";
 import { ClubMembership } from "../../models/connections/userToClub.model.js";
 import { ApiError } from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
+import admin from "../../../config/firebase.js";
+import User from "../../models/Profile/auth.models.js";
 
 const ObjectId = mongoose.Types.ObjectId;
 
@@ -27,12 +29,14 @@ const ensureAdminOrOwner = async (clubId, userId) => {
 /* ======================================================
    JOIN PUBLIC CLUB
 ====================================================== */
+
 export const joinClub = async (req, res) => {
   const { clubId } = req.params;
   const userId = req.user._id;
+  const userName = req.user.displayName || "Someone";
 
   /* ---------------- Find Club ---------------- */
-  const club = await Club.findById(clubId).select("privacy");
+  const club = await Club.findById(clubId).select("privacy clubId clubName");
   if (!club) {
     throw new ApiError(404, "Club not found");
   }
@@ -51,10 +55,8 @@ export const joinClub = async (req, res) => {
     userId,
   });
 
-  if (existingMembership) {
-    if (existingMembership.status === "approved") {
-      throw new ApiError(409, "Already a member of this club");
-    }
+  if (existingMembership?.status === "approved") {
+    throw new ApiError(409, "Already a member of this club");
   }
 
   /* ---------------- Create Membership ---------------- */
@@ -66,23 +68,46 @@ export const joinClub = async (req, res) => {
     joinedAt: new Date(),
   });
 
+  /* ---------------- Subscribe User to club topic ---------------- */
+  const user = await User.findById(userId).select("deviceTokens");
+  const tokens = user?.deviceTokens || [];
+
+  if (tokens.length > 0) {
+    await admin.messaging().subscribeToTopic(
+      tokens,
+      `club_${club.clubId}`
+    );
+  }
+
+  /* ---------------- Notify Admins ---------------- */
+  await admin.messaging().send({
+    topic: `admin_${club.clubId}`,
+    notification: {
+      title: "New Member Joined",
+      body: `${userName} joined ${club.clubName}`,
+    },
+    data: {
+      clubId: club._id.toString(),
+      userId: userId.toString(),
+      type: "CLUB_MEMBER_JOINED",
+    },
+  });
+
   return res.status(200).json(
-    new ApiResponse(
-      200,
-      membership,
-      "Joined club successfully"
-    )
+    new ApiResponse(200, membership, "Joined club successfully")
   );
 };
 
 /* ======================================================
    REQUEST TO JOIN PRIVATE CLUB
 ====================================================== */
+
 export const requestToJoinClub = async (req, res) => {
   const { clubId } = req.params;
   const userId = req.user._id;
+  const userName = req.user.displayName || "Someone";
 
-  const club = await Club.findById(clubId).select("privacy");
+  const club = await Club.findById(clubId).select("privacy clubName clubId");
   if (!club) {
     throw new ApiError(404, "Club not found");
   }
@@ -104,8 +129,7 @@ export const requestToJoinClub = async (req, res) => {
     }
 
     if (membership.status === "rejected") {
-      // 🔒 Optional cooldown (recommended)
-      const COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24h
+      const COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
       if (
         membership.updatedAt &&
@@ -117,11 +141,24 @@ export const requestToJoinClub = async (req, res) => {
         );
       }
 
-      // ♻️ Re-activate request
       membership.status = "pending";
       membership.requestedAt = new Date();
       membership.actionBy = null;
       await membership.save();
+
+      /* 🔔 Notify admins */
+      await admin.messaging().send({
+        topic: `admin_${club.clubId}`,
+        notification: {
+          title: "New Join Request",
+          body: `${userName} wants to join ${club.clubName}`,
+        },
+        data: {
+          clubId: club._id.toString(),
+          userId: userId.toString(),
+          type: "CLUB_JOIN_REQUEST",
+        },
+      });
 
       return res.status(200).json(
         new ApiResponse(200, membership, "Join request re-submitted")
@@ -138,10 +175,25 @@ export const requestToJoinClub = async (req, res) => {
     requestedAt: new Date(),
   });
 
+  /* 🔔 Notify admins */
+  await admin.messaging().send({
+    topic: `admin_${club.clubId}`,
+    notification: {
+      title: "New Join Request",
+      body: `${userName} wants to join ${club.clubName}`,
+    },
+    data: {
+      clubId: club._id.toString(),
+      userId: userId.toString(),
+      type: "CLUB_JOIN_REQUEST",
+    },
+  });
+
   return res.status(200).json(
     new ApiResponse(200, newMembership, "Join request sent successfully")
   );
 };
+
 
 
 /* ======================================================
@@ -151,21 +203,125 @@ export const acceptJoinRequest = async (req, res) => {
   const { membershipId } = req.params;
   const adminId = req.user._id;
 
+  console.log("➡️ acceptJoinRequest called");
+  console.log("membershipId:", membershipId);
+  console.log("adminId:", adminId.toString());
+
+  /* ---------------- Find Membership ---------------- */
   const membership = await ClubMembership.findById(membershipId);
+
+  console.log("membership found:", !!membership);
   if (!membership || membership.status !== "pending") {
     throw new ApiError(404, "Invalid join request");
   }
 
-  await ensureAdminOrOwner(membership.clubId, adminId);
+  console.log("membership.clubId:", membership.clubId.toString());
+  console.log("membership.userId:", membership.userId.toString());
 
+  /* ---------------- Authorization ---------------- */
+  await ensureAdminOrOwner(membership.clubId, adminId);
+  console.log("admin authorization ✅");
+
+  /* ---------------- Approve Membership ---------------- */
   membership.status = "approved";
   membership.joinedAt = new Date();
   membership.actionBy = adminId;
   await membership.save();
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, membership, "Member approved"));
+  console.log("membership approved & saved");
+
+  /* ---------------- Fetch Club ---------------- */
+  const club = await Club.findById(membership.clubId).select(
+    "clubId clubName"
+  );
+
+  console.log("club found:", !!club);
+  if (!club) {
+    throw new ApiError(404, "Club not found");
+  }
+
+  console.log("club.clubId (string):", club.clubId);
+  console.log("club.clubName:", club.clubName);
+
+  /* ---------------- Fetch User Tokens ---------------- */
+  const user = await User.findById(membership.userId).select("deviceTokens");
+
+  console.log("user found:", !!user);
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  const tokens = (user.deviceTokens || []).filter(
+    (t) => typeof t === "string" && t.length > 20
+  );
+
+  console.log("raw tokens:", user.deviceTokens);
+  console.log("valid tokens:", tokens);
+  console.log("token count:", tokens.length);
+
+  /* ---------------- Subscribe ALL tokens to club topic ---------------- */
+if (tokens.length > 0) {
+  const topic = `club_${club._id.toString()}`;
+
+  console.log("📌 subscribing to topic:", topic);
+
+  try {
+    await admin.messaging().subscribeToTopic(tokens, topic);
+    console.log("topic subscription ✅");
+  } catch (err) {
+    console.error(
+      "❌ topic subscription failed:",
+      err.code,
+      err.message
+    );
+  }
+}
+
+  /* ---------------- Notify ONLY latest device ---------------- */
+  if (tokens.length > 0) {
+    const latestToken = tokens[tokens.length - 1];
+    console.log("📱 notifying latest token:", latestToken);
+
+    try {
+      await admin.messaging().send({
+        token: latestToken,
+        notification: {
+          title: "Request Accepted 🎉",
+          body: `You are now a member of ${club.clubName}`,
+        },
+        data: {
+          clubId: club._id.toString(),
+          type: "CLUB_JOIN_ACCEPTED",
+        },
+      });
+
+      console.log("notification sent ✅");
+    } catch (err) {
+      console.error(
+        "❌ notification failed:",
+        err.code,
+        err.message
+      );
+
+      // Optional cleanup (recommended)
+      if (
+        err.code === "messaging/registration-token-not-registered" ||
+        err.code === "messaging/invalid-registration-token"
+      ) {
+        await User.updateOne(
+          { _id: user._id },
+          { $pull: { deviceTokens: latestToken } }
+        );
+        console.log("🧹 invalid token removed from DB");
+      }
+    }
+  } else {
+    console.log("⚠️ no valid device tokens to notify");
+  }
+
+  return res.status(200).json(
+    new ApiResponse(200, membership, "Member approved successfully")
+  );
 };
 
 /* ======================================================
@@ -198,6 +354,7 @@ export const leaveClub = async (req, res) => {
   const { clubId } = req.params;
   const userId = req.user._id;
 
+  /* ---------------- Find Membership ---------------- */
   const membership = await ClubMembership.findOne({
     clubId,
     userId,
@@ -212,14 +369,32 @@ export const leaveClub = async (req, res) => {
     throw new ApiError(403, "Owner cannot leave the club");
   }
 
+  /* ---------------- Update Membership ---------------- */
   membership.status = "removed";
+  membership.leftAt = new Date();
   await membership.save();
+
+  /* ---------------- Fetch Club ---------------- */
+  const club = await Club.findById(clubId).select("clubId");
+  if (!club) {
+    throw new ApiError(404, "Club not found");
+  }
+
+  /* ---------------- Unsubscribe from club topic ---------------- */
+  const user = await User.findById(userId).select("deviceTokens");
+  const tokens = user?.deviceTokens || [];
+
+  if (tokens.length > 0) {
+    await admin.messaging().unsubscribeFromTopic(
+      tokens,
+      `club_${club.clubId}`
+    );
+  }
 
   return res
     .status(200)
     .json(new ApiResponse(200, null, "Left club successfully"));
 };
-
 /* ======================================================
    PROMOTE MEMBER TO ADMIN
 ====================================================== */
@@ -227,20 +402,59 @@ export const promoteToAdmin = async (req, res) => {
   const { membershipId } = req.params;
   const adminId = req.user._id;
 
+  /* ---------------- Find Membership ---------------- */
   const membership = await ClubMembership.findById(membershipId);
   if (!membership || membership.status !== "approved") {
     throw new ApiError(404, "Invalid member");
   }
 
-  const admin = await ensureAdminOrOwner(membership.clubId, adminId);
+  /* ---------------- Authorization ---------------- */
+  const adminUser = await ensureAdminOrOwner(membership.clubId, adminId);
 
-  if (admin.role !== "owner") {
+  if (adminUser.role !== "owner") {
     throw new ApiError(403, "Only owner can promote admins");
   }
 
+  /* ---------------- Promote ---------------- */
   membership.role = "admin";
   membership.actionBy = adminId;
   await membership.save();
+
+  /* ---------------- Fetch Club ---------------- */
+  const club = await Club.findById(membership.clubId).select(
+    "clubId clubName"
+  );
+
+  /* ---------------- Fetch User Tokens ---------------- */
+  const user = await User.findById(membership.userId).select(
+    "deviceTokens"
+  );
+
+  const tokens = user?.deviceTokens || [];
+
+  /* ---------------- Subscribe to admin topic ---------------- */
+  if (tokens.length > 0) {
+    await admin.messaging().subscribeToTopic(
+      tokens,
+      `admin_${club.clubId}`
+    );
+  }
+
+  /* ---------------- Notify User ---------------- */
+  if (tokens.length > 0) {
+    await admin.messaging().sendMulticast({
+      tokens,
+      notification: {
+        title: "You're now an Admin 🎉",
+        body: `You have been promoted to admin in ${club.clubName}`,
+      },
+      data: {
+        clubId: club._id.toString(),
+        role: "admin",
+        type: "CLUB_ROLE_UPDATED",
+      },
+    });
+  }
 
   return res
     .status(200)

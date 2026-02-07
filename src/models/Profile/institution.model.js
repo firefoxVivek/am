@@ -16,6 +16,11 @@ const InstitutionSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+subscribersCount: {
+  type: Number,
+  default: 0,
+  index: true,
+},
 
     councilName: [
       {
