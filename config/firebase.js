@@ -13,18 +13,10 @@
 // }
 
 // export default admin;
-import admin from "firebase-admin";
+var admin = require("firebase-admin");
 
-if (!admin.apps.length) {
-  const serviceAccount = JSON.parse(
-    process.env.FIREBASE_SERVICE_ACCOUNT
-  );
+var serviceAccount = require("path/to/serviceAccountKey.json");
 
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
-
-  console.log("✅ Firebase Admin initialized");
-}
-
-export default admin;
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
