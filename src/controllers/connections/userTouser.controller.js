@@ -315,8 +315,8 @@ export const getMyFriends = async (req, res) => {
     status: "accepted",
     $or: [{ requester: userId }, { recipient: userId }],
   })
-    .populate("requester", "name imageUrl")
-    .populate("recipient", "name imageUrl");
+    .populate("requester", "username displayName imageUrl")
+    .populate("recipient", "username displayName imageUrl");
 
   return res
     .status(200)
@@ -328,7 +328,7 @@ export const getIncomingRequests = async (req, res) => {
   const requests = await Friendship.find({
     recipient: userId,
     status: "pending",
-  }).populate("requester", "name imageUrl");
+  }).populate("requester", "username imageUrl");
 
   return res
     .status(200)

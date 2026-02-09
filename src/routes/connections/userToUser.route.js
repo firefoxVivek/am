@@ -25,7 +25,7 @@ router.delete("/remove/:userId", removeFriend);
  
 
  
-router.get("/my", getMyFriends);
+router.get("/myfriends", getMyFriends);
 router.get("/requests/incoming", getIncomingRequests);
 router.get("/requests/outgoing", getOutgoingRequests);
 

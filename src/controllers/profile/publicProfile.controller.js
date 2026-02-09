@@ -4,10 +4,12 @@ import mongoose from "mongoose";
 
 import { User } from "../../models/Profile/auth.models.js"; 
 import { ApiError } from "../../utils/ApiError.js";
+import { Friendship } from "../../models/connections/usersToUser.model.js";
+import UserProfile from "../../models/Profile/profile.model.js";
 
-export const getPublicUserProfile = asynchandler(async (req, res) => {
+export const getPublicUserProfile =  async (req, res) => {
+  const viewerId = req.user?._id; // logged-in user
   const { userId } = req.params;
-  const viewerId = req.user?._id;
 
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     throw new ApiError(400, "Invalid user id");
@@ -16,166 +18,67 @@ export const getPublicUserProfile = asynchandler(async (req, res) => {
   const uid = new mongoose.Types.ObjectId(userId);
   const vid = viewerId ? new mongoose.Types.ObjectId(viewerId) : null;
 
-  const result = await User.aggregate([
-    // 1️⃣ Match user
-    { $match: { _id: uid } },
+  // 1️⃣ Fetch profile + stats
+  const profile = await UserProfile.findOne({ userId: uid })
+    .select(
+      "name username imageUrl location about hobbies experiences totalFriends totalPosts totalParticipations"
+    )
+    .lean();
 
-    // 2️⃣ Join profile
-    {
-      $lookup: {
-        from: "userprofiles",
-        localField: "_id",
-        foreignField: "userId",
-        as: "profile",
-      },
-    },
-    { $unwind: { path: "$profile", preserveNullAndEmptyArrays: true } },
+  if (!profile) throw new ApiError(404, "User profile not found");
 
-    // 3️⃣ Count friends
-    {
-      $lookup: {
-        from: "friendships",
-        let: { uid: "$_id" },
-        pipeline: [
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $eq: ["$status", "accepted"] },
-                  {
-                    $or: [
-                      { $eq: ["$requester", "$$uid"] },
-                      { $eq: ["$recipient", "$$uid"] },
-                    ],
-                  },
-                ],
-              },
-            },
-          },
-        ],
-        as: "friends",
-      },
-    },
+  
+  const isSelf = vid?.toString() === uid.toString();
+ 
+  let friendshipStatus = null;
+  if (vid && !isSelf) {
+    const friendship = await Friendship.findOne({
+      $or: [
+        { requester: vid, recipient: uid },
+        { requester: uid, recipient: vid },
+      ],
+    }).lean();
 
-    // 4️⃣ Friendship vs viewer
-    {
-      $lookup: {
-        from: "friendships",
-        let: { uid: "$_id", vid },
-        pipeline: [
-          {
-            $match: {
-              $expr: {
-                $or: [
-                  {
-                    $and: [
-                      { $eq: ["$requester", "$$vid"] },
-                      { $eq: ["$recipient", "$$uid"] },
-                    ],
-                  },
-                  {
-                    $and: [
-                      { $eq: ["$requester", "$$uid"] },
-                      { $eq: ["$recipient", "$$vid"] },
-                    ],
-                  },
-                ],
-              },
-            },
-          },
-        ],
-        as: "friendship",
-      },
-    },
-
-    // 5️⃣ Compute fields
-    {
-      $addFields: {
-        isSelf: { $eq: ["$_id", vid] },
-
-        stats: {
-          friends: { $size: "$friends" },
-        },
-
-        friendship: {
-          $cond: [
-            { $eq: ["$_id", vid] },
-            {
-              status: "self",
-              isFriend: false,
-              canSendRequest: false,
-            },
-            {
-              $cond: [
-                { $gt: [{ $size: "$friendship" }, 0] },
-                {
-                  $let: {
-                    vars: { f: { $arrayElemAt: ["$friendship", 0] } },
-                    in: {
-                      status: "$$f.status",
-                      isFriend: { $eq: ["$$f.status", "accepted"] },
-                      canSendRequest: {
-                        $not: {
-                          $in: ["$$f.status", ["accepted", "pending"]],
-                        },
-                      },
-                    },
-                  },
-                },
-                {
-                  status: "none",
-                  isFriend: false,
-                  canSendRequest: true,
-                },
-              ],
-            },
-          ],
-        },
-      },
-    },
-
-    // 6️⃣ Final SAFE projection
-    {
-      $project: {
-        _id: 1,
-        displayName: 1,
-        username: 1,
-
-        imageUrl: {
-          $ifNull: [
-            "$profile.imageUrl",
-            {
-              $cond: [
-                { $eq: ["$imageUrl", ""] },
-                null,
-                "$imageUrl",
-              ],
-            },
-          ],
-        },
-
-        about: { $ifNull: ["$profile.about", ""] },
-        hobbies: { $ifNull: ["$profile.hobbies", []] },
-        experiences: { $ifNull: ["$profile.experiences", []] },
-        userTypeMeta: { $ifNull: ["$profile.userTypeMeta", {}] },
-
-        friendship: 1,
-        isSelf: 1,
-        stats: 1,
-      },
-    },
-  ]);
-
-  if (!result.length) {
-    throw new ApiError(404, "Public profile not found");
+    if (friendship) {
+      friendshipStatus = {
+        status: friendship.status, // pending / accepted / rejected / blocked
+        requester: friendship.requester.toString(),
+        recipient: friendship.recipient.toString(),
+        isRequester: friendship.requester.toString() === vid.toString(),
+        isRecipient: friendship.recipient.toString() === vid.toString(),
+        isFriend: friendship.status === "accepted",
+      };
+    } else {
+      friendshipStatus = {
+        status: "none", // no request exists
+        isRequester: false,
+        isRecipient: false,
+        isFriend: false,
+      };
+    }
   }
+
+  // 4️⃣ Return clean public response
+  const data = {
+    userId: uid,
+    displayName: profile.name,
+    username: profile.username,
+    imageUrl: profile.imageUrl,
+    bio: profile.about,
+    hobbies: profile.hobbies,
+    experiences: profile.experiences,
+    totalFriends: profile.totalFriends ?? 0,
+    totalPosts: profile.totalPosts ?? 0,
+    totalParticipations: profile.totalParticipations ?? 0,
+    isSelf,
+    friendship: friendshipStatus,
+    location: profile.location || null,
+  };
 
   return res
     .status(200)
-    .json(
-      new ApiResponse(200, result[0], "Public profile fetched successfully")
-    );
-});
+    .json(new ApiResponse(200, data, "Public profile fetched successfully"));
+};
  
 
 export const searchPublicUserProfiles = asynchandler(async (req, res) => {

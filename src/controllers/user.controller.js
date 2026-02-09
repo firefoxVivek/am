@@ -162,6 +162,35 @@ const resendOtp = async (req, res) => {
 };
 
  
+export const checkUsernameAvailability = async (req, res) => {
+  try {
+    const { username } = req.params;
+
+    if (!username || username.trim().length < 3) {
+      return res.status(400).json({
+        success: false,
+        message: "Username must be at least 3 characters",
+      });
+    }
+
+    const normalizedUsername = username.trim().toLowerCase();
+
+    const exists = await User.findOne({
+      username: normalizedUsername,
+    });
+
+    return res.status(200).json({
+      success: true,
+      available: !exists,
+    });
+  } catch (error) {
+    console.error("Username availability check error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong",
+    });
+  }
+};
 
   const loginUser = asynchandler(async (req, res) => {
   const { email, password } = req.body;

@@ -9,7 +9,7 @@ import {
     updateUserAvatar,
     updateUserCoverImage,
 completeProfileAfterOtp,
- 
+ checkUsernameAvailability,
     updateFcmToken,
     verifyOtp,
     resendOtp
@@ -24,6 +24,7 @@ router.route("/register").post(registerUser);
 router.route("/verifyOtp").post(verifyOtp)
 router.route("/resendOtp").post(resendOtp)
 router.route("/login").post(loginUser)
+router.route("/checkusername/:username").get(checkUsernameAvailability)
  
 router.post(
   "/completeprofile",
