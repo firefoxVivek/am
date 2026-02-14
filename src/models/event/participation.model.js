@@ -47,15 +47,19 @@ const eventParticipationSchema = new mongoose.Schema(
       default: "absent",
       index: true,
     },
+
+    // ✅ NEW FIELD
+    auditedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+    },
   },
   {
     timestamps: true,
   }
 );
 
-/* =========================
-   INDEXES
-========================== */
 /* =========================
    INDEXES
 ========================== */

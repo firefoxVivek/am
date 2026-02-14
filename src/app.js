@@ -49,6 +49,8 @@ import IServices from "./routes/institution/services.routes.js";
 import IBooking from "./routes/institution/booking.routes.js";
 import Location from "./routes/others/location.routes.js";
 import Categories from "./routes/others/categories.routes.js";
+import Conversations from "./routes/connections/conversation.route.js";
+import messages from "./routes/connections/message.route.js";
 
 app.use("/api/v1/auth", userRouter);
 app.use("/api/v1/profile", Profile);
@@ -64,6 +66,8 @@ app.use("/api/v1/membership",Membership);
 app.use("/api/v1/stories", Story);
 app.use("/api/v1/location", Location);
 app.use("/api/v1/categories", Categories);
+app.use("/api/v1/conversations", Conversations);
+app.use("/api/v1/messages", messages);
 
 app.use("/api/v1/institution/profile", IProfile );
 app.use("/api/v1/institution/services", IServices );
