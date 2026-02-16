@@ -4,7 +4,7 @@ import {
   getStoryByUserId,
   getStoryByStoryId,
   updateStory,
-  patchStory,
+  patchStory,getStoryByClubId,
   deleteStory,
 } from "../../controllers/story/story.controller.js";
 import { verifyJWT } from "../../middleware/auth.middleware.js";
@@ -16,7 +16,7 @@ router.post("/", verifyJWT, createStory);
 router.get("/:storyId", verifyJWT, getStoryByStoryId);
 
 router.get("/user/:userId", verifyJWT, getStoryByUserId);
-
+router.get("/club/:clubId", verifyJWT, getStoryByClubId);
 router.put("/:topicId", verifyJWT, updateStory);
 
 router.patch("/:topicId", verifyJWT, patchStory);
