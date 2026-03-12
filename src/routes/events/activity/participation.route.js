@@ -1,67 +1,41 @@
 import express from "express";
 import {
-  registerForEvent,
+  registerForActivity,
+  cancelRegistration,
   markAttendance,
-  getParticipantsByActivity,getMyEventParticipations,getMyEventParticipationsDateWise,
-  getMyParticipation,notifyActivity
+  getParticipantsByActivity,
+  getParticipantsByEvent,
+  getMyActivityRegistration,
+  getMyRegistrations,
+  getMyRegistrationsCalendar,
+  notifyActivityParticipants,
 } from "../../../controllers/events/Activity/participation.controller.js";
 import { verifyJWT } from "../../../middleware/auth.middleware.js";
- 
 
 const router = express.Router();
 
-/* =========================
-   REGISTRATION
-========================== */
+/**
+ * Base: /api/v1/events/participation
+ * Rule: /me/* and static paths MUST come before /:participationId param routes
+ */
 
-// register (participant or audience)
-router.post("/register", verifyJWT, registerForEvent);
+// ── My registrations (most specific first) ───────────────
+router.get("/me/calendar",                    verifyJWT, getMyRegistrationsCalendar);   // GET  /participation/me/calendar
+router.get("/me",                             verifyJWT, getMyRegistrations);            // GET  /participation/me
+router.get("/my/activity/:activityId",        verifyJWT, getMyActivityRegistration);    // GET  /participation/my/activity/:activityId
 
-/* =========================
-   ATTENDANCE
-========================== */
+// ── Admin reads ──────────────────────────────────────────
+router.get("/activity/:activityId",           verifyJWT, getParticipantsByActivity);    // GET  /participation/activity/:activityId?role=
+router.get("/event/:eventId",                 verifyJWT, getParticipantsByEvent);       // GET  /participation/event/:eventId?role=&activityId=
 
-// mark present / absent (admin or coordinator)
-router.patch(
-  "/:participationId/attendance",
-  verifyJWT,
-  markAttendance
-);
+// ── Register / Cancel ────────────────────────────────────
+router.post("/register",                      verifyJWT, registerForActivity);           // POST   /participation/register
+router.delete("/:activityId/cancel",          verifyJWT, cancelRegistration);           // DELETE /participation/:activityId/cancel
 
-/* =========================
-   FETCHING
-========================== */
+// ── Admin: notify broadcast ──────────────────────────────
+router.post("/activity/:activityId/notify",   verifyJWT, notifyActivityParticipants);   // POST   /participation/activity/:activityId/notify
 
-// get participants or audience of an activity
-router.get(
-  "/activity/:activityId",
-  verifyJWT,
-  getParticipantsByActivity
-);
-
-// get my participation (for profile / ticket page)
-router.get(
-  "/my/:eventId",
-  verifyJWT,
-  getMyParticipation
-);
-router.get(
-  "/me/events",
-  verifyJWT,
-  getMyEventParticipations
-);
-
-// optional
-router.get(
-  "/me/events/date-wise",
-  verifyJWT,
-  getMyEventParticipationsDateWise
-);
-router.post(
-  "/activities/:activityId/notify",
-  verifyJWT,
-  // optional: isAdminOrOrganizer
-  notifyActivity
-);
+// ── Attendance (participationId param — keep last) ───────
+router.patch("/:participationId/attendance",  verifyJWT, markAttendance);               // PATCH  /participation/:participationId/attendance
 
 export default router;

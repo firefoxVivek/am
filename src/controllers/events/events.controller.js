@@ -1,320 +1,227 @@
 import mongoose from "mongoose";
-import Event from "../../models/event/event.model.js";
-import EventDay from "../../models/event/Activity/masterday.model.js";
-import admin from "../../../config/firebase.js";
+import { Event }              from "../../models/event/event.model.js";
+import { Activity }           from "../../models/event/Activity/masterday.model.js";
+import { EventParticipation } from "../../models/event/participation.model.js";
+import admin                  from "../../../config/firebase.js";
+import { ApiError }           from "../../utils/ApiError.js";
+import { ApiResponse }        from "../../utils/ApiResponse.js";
+import { asynchandler }       from "../../utils/asynchandler.js";
 
-/* ======================================================
+const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+/* ══════════════════════════════════════════════════════════
    CREATE EVENT
-====================================================== */
-export const createEvent = async (req, res) => {
-  try {
-    const payload = req.body;
+   POST /api/v1/events/create
+   Auth: required
+   Body: name, banner, description, type, genre, location{}, startDate, endDate, clubId
+         [institutionId, councilId]
+══════════════════════════════════════════════════════════ */
+export const createEvent = asynchandler(async (req, res) => {
+  const { name, banner, description, type, genre, location, startDate, endDate, clubId, institutionId, councilId } = req.body;
 
-    if (new Date(payload.startDate) > new Date(payload.endDate)) {
-      return res.status(400).json({
-        message: "Start date cannot be after end date",
-      });
-    }
-
-    if (
-      new Date(payload.lastRegistrationDate) >
-      new Date(payload.startDate)
-    ) {
-      return res.status(400).json({
-        message:
-          "Last registration date must be before event start date",
-      });
-    }
-
-    /* ---------------- Create Event ---------------- */
-    const event = await Event.create(payload);
-
-    /* ---------------- Notify Club Members ---------------- */
-    if (payload.clubId) {
-      const topic = `club_${payload.clubId}`;
-
-      // 🔍 DEBUG LOG
-      console.log("📣 FCM EVENT TOPIC:", topic);
-
-      try {
-        await admin.messaging().send({
-          topic,
-          notification: {
-            title: "New Event 📅",
-            body: `${event.name || "A new event"} has been announced`,
-          },
-          data: {
-            eventId: event._id.toString(),
-            clubId: payload.clubId.toString(),
-            type: "CLUB_EVENT_CREATED",
-          },
-        });
-      } catch (err) {
-        console.error(
-          "❌ FCM event notify failed:",
-          err.code,
-          err.message
-        );
-      }
-    }
-
-    return res.status(201).json({
-      message: "Event created successfully",
-      data: event,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Failed to create event",
-      error: error.message,
-    });
+  if (!name || !banner || !description || !type || !genre || !startDate || !endDate || !clubId) {
+    throw new ApiError(400, "name, banner, description, type, genre, startDate, endDate, clubId are required");
   }
-};
 
-/* ======================================================
-   GET EVENTS (LIST + FILTERS)
-====================================================== */
-export const getEvents = async (req, res) => {
-  try {
-    const {
-      clubId,
-      institutionId,
-      councilId,
-      status,
-      eventType,
-      upcoming,
-    } = req.query;
-
-    const filter = {};
-
-    if (clubId && mongoose.Types.ObjectId.isValid(clubId)) {
-      filter.clubId = clubId;
-    }
-
-    if (
-      institutionId &&
-      mongoose.Types.ObjectId.isValid(institutionId)
-    ) {
-      filter.institutionId = institutionId;
-    }
-
-    if (councilId && mongoose.Types.ObjectId.isValid(councilId)) {
-      filter.councilId = councilId;
-    }
-
-    if (status) filter.status = status;
-    if (eventType) filter.eventType = eventType;
-
-    if (upcoming === "true") {
-      filter.startDate = { $gte: new Date() };
-    }
-
-    const events = await Event.find(filter)
-      .sort({ startDate: 1 })
-      .lean();
-
-    return res.status(200).json({
-      count: events.length,
-      data: events,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Failed to fetch events",
-      error: error.message,
-    });
+  if (new Date(startDate) > new Date(endDate)) {
+    throw new ApiError(400, "startDate cannot be after endDate");
   }
-};
 
-/* ======================================================
-   GET SINGLE EVENT (WITH DAYS)
-====================================================== */
-export const getEventById = async (req, res) => {
-  try {
-    const { eventId } = req.params;
+  const event = await Event.create({
+    name, banner, description, type, genre,
+    location: location || {},
+    startDate, endDate, clubId,
+    ...(institutionId && { institutionId }),
+    ...(councilId && { councilId }),
+  });
 
-    if (!mongoose.Types.ObjectId.isValid(eventId)) {
-      return res.status(400).json({ message: "Invalid eventId" });
-    }
+  // FCM — notify club topic (non-blocking)
+  admin.messaging().send({
+    topic: `club_${clubId}`,
+    notification: { title: "New Event Announced!", body: `${name} is coming. Stay tuned.` },
+    data: { eventId: event._id.toString(), type: "EVENT_CREATED" },
+  }).catch((e) => console.error("FCM createEvent:", e.message));
 
-    const event = await Event.findById(eventId).lean();
+  return res.status(201).json(new ApiResponse(201, event, "Event created successfully"));
+});
 
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
-    }
+/* ══════════════════════════════════════════════════════════
+   GET EVENTS BY CLUB
+   GET /api/v1/events/club/:clubId
+   Query: status, genre, type, upcoming (true/false)
+══════════════════════════════════════════════════════════ */
+export const getEventsByClub = asynchandler(async (req, res) => {
+  const { clubId } = req.params;
+  if (!isValidId(clubId)) throw new ApiError(400, "Invalid clubId");
 
-    // Fetch days separately (scalable)
-    const days = await EventDay.find({ eventId })
-      .sort({ dayNumber: 1 })
-      .lean();
+  const { status, genre, type, upcoming } = req.query;
+  const filter = { clubId };
 
-    return res.status(200).json({
-      data: {
-        ...event,
-        days,
-      },
-    });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Failed to fetch event",
-      error: error.message,
-    });
+  if (status)          filter.status = status;
+  if (genre)           filter.genre  = genre;
+  if (type)            filter.type   = type;
+  if (upcoming === "true") filter.startDate = { $gte: new Date() };
+
+  const events = await Event.find(filter).sort({ startDate: 1 }).lean();
+  return res.status(200).json(new ApiResponse(200, { count: events.length, events }, "Fetched successfully"));
+});
+
+/* ══════════════════════════════════════════════════════════
+   GET UPCOMING EVENTS FOR CLUB  (next 30 days, published only)
+   GET /api/v1/events/club/:clubId/upcoming
+══════════════════════════════════════════════════════════ */
+export const getUpcomingClubEvents = asynchandler(async (req, res) => {
+  const { clubId } = req.params;
+  if (!isValidId(clubId)) throw new ApiError(400, "Invalid clubId");
+
+  const now  = new Date();
+  const in30 = new Date(); in30.setDate(now.getDate() + 30);
+
+  const events = await Event.find({
+    clubId,
+    status: "published",
+    startDate: { $gte: now, $lte: in30 },
+  })
+    .select("name banner type genre location startDate endDate totalActivities totalRegistrations status")
+    .sort({ startDate: 1 })
+    .lean();
+
+  return res.status(200).json(new ApiResponse(200, { count: events.length, events }, "Upcoming events fetched"));
+});
+
+/* ══════════════════════════════════════════════════════════
+   SEARCH EVENTS
+   GET /api/v1/events/search?q=hackathon&genre=technical&status=published&type=fest
+══════════════════════════════════════════════════════════ */
+export const searchEvents = asynchandler(async (req, res) => {
+  const { q, genre, type, status } = req.query;
+
+  if (!q || q.trim().length < 2) {
+    throw new ApiError(400, "Search query must be at least 2 characters");
   }
-};
 
-/* ======================================================
-   UPDATE EVENT (PARTIAL)
-====================================================== */
-export const updateEvent = async (req, res) => {
-  try {
-    const { eventId } = req.params;
+  const filter = { $text: { $search: q.trim() } };
+  if (genre)  filter.genre  = genre;
+  if (type)   filter.type   = type;
+  if (status) filter.status = status;
 
-    if (!mongoose.Types.ObjectId.isValid(eventId)) {
-      return res.status(400).json({ message: "Invalid eventId" });
+  const events = await Event.find(filter, { score: { $meta: "textScore" } })
+    .sort({ score: { $meta: "textScore" }, startDate: 1 })
+    .lean();
+
+  return res.status(200).json(new ApiResponse(200, { count: events.length, events }, "Search results"));
+});
+
+/* ══════════════════════════════════════════════════════════
+   GET SINGLE EVENT  (with activities summary)
+   GET /api/v1/events/:eventId
+══════════════════════════════════════════════════════════ */
+export const getEventById = asynchandler(async (req, res) => {
+  const { eventId } = req.params;
+  if (!isValidId(eventId)) throw new ApiError(400, "Invalid eventId");
+
+  const event = await Event.findById(eventId).lean();
+  if (!event) throw new ApiError(404, "Event not found");
+
+  // Attach activity summaries (sorted by day)
+  const activities = await Activity.find({ eventId })
+    .select("activityName category dayNumber date participationFee registrationDeadline maxParticipants registrationsCount teamAllowed teamSize status venueLogistics.venueName")
+    .sort({ dayNumber: 1, date: 1 })
+    .lean();
+
+  return res.status(200).json(new ApiResponse(200, { ...event, activities }, "Event fetched"));
+});
+
+/* ══════════════════════════════════════════════════════════
+   UPDATE EVENT  (partial — excludes status, use /publish)
+   PATCH /api/v1/events/:eventId
+   Auth: required
+══════════════════════════════════════════════════════════ */
+export const updateEvent = asynchandler(async (req, res) => {
+  const { eventId } = req.params;
+  if (!isValidId(eventId)) throw new ApiError(400, "Invalid eventId");
+
+  // Strip system-managed and status fields
+  const { status, totalActivities, totalRegistrations, ...updates } = req.body;
+
+  if (updates.startDate && updates.endDate) {
+    if (new Date(updates.startDate) > new Date(updates.endDate)) {
+      throw new ApiError(400, "startDate cannot be after endDate");
     }
-
-    const updates = req.body;
-
-    if (updates.startDate && updates.endDate) {
-      if (
-        new Date(updates.startDate) >
-        new Date(updates.endDate)
-      ) {
-        return res.status(400).json({
-          message: "Start date cannot be after end date",
-        });
-      }
-    }
-
-    const updatedEvent = await Event.findByIdAndUpdate(
-      eventId,
-      { $set: updates },
-      {
-        new: true,
-        runValidators: true,
-      }
-    );
-
-    if (!updatedEvent) {
-      return res.status(404).json({ message: "Event not found" });
-    }
-
-    return res.status(200).json({
-      message: "Event updated successfully",
-      data: updatedEvent,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Failed to update event",
-      error: error.message,
-    });
   }
-};
- 
 
-export const getUpcomingClubEvents = async (req, res) => {
-  try {
-    const { clubId } = req.params;
+  const updated = await Event.findByIdAndUpdate(
+    eventId,
+    { $set: updates },
+    { new: true, runValidators: true }
+  );
+  if (!updated) throw new ApiError(404, "Event not found");
 
-    // 1. Define the Time Range
-    const now = new Date();
-    const oneMonthFromNow = new Date();
-    oneMonthFromNow.setMonth(now.getMonth() + 1);
+  return res.status(200).json(new ApiResponse(200, updated, "Event updated"));
+});
 
-    // 2. Fetch events
-    const events = await Event.find({
-      clubId: clubId,
-      status: "published", // Only show live events
-      startDate: {
-        $gte: now,             // Starting from now
-        $lte: oneMonthFromNow  // Until exactly one month later
-      }
-    })
-    .select("_id name startDate endDate venue banner") // Only return these specific fields
-    .sort({ startDate: 1 }); // Sort by soonest first
+/* ══════════════════════════════════════════════════════════
+   PUBLISH EVENT
+   PATCH /api/v1/events/:eventId/publish
+   Auth: required
+   Rule: event must have at least one activity before it can be published
+══════════════════════════════════════════════════════════ */
+export const publishEvent = asynchandler(async (req, res) => {
+  const { eventId } = req.params;
+  if (!isValidId(eventId)) throw new ApiError(400, "Invalid eventId");
 
-    return res.status(200).json({
-      success: true,
-      count: events.length,
-      data: events
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Error fetching upcoming events",
-      error: error.message
-    });
+  const event = await Event.findById(eventId);
+  if (!event) throw new ApiError(404, "Event not found");
+
+  if (event.status === "published") throw new ApiError(400, "Event is already published");
+  if (event.status === "cancelled") throw new ApiError(400, "Cannot publish a cancelled event");
+
+  const activityCount = await Activity.countDocuments({ eventId });
+  if (activityCount === 0) {
+    throw new ApiError(400, "Add at least one activity before publishing the event");
   }
-};
-/* ======================================================
-   DELETE EVENT (CASCADE DAYS)
-====================================================== */
-export const deleteEvent = async (req, res) => {
+
+  event.status = "published";
+  await event.save();
+
+  // FCM — notify club (non-blocking)
+  admin.messaging().send({
+    topic: `club_${event.clubId}`,
+    notification: { title: "Event is Live! 🎉", body: `${event.name} is now open for registrations` },
+    data: { eventId: event._id.toString(), type: "EVENT_PUBLISHED" },
+  }).catch((e) => console.error("FCM publishEvent:", e.message));
+
+  return res.status(200).json(new ApiResponse(200, event, "Event published successfully"));
+});
+
+/* ══════════════════════════════════════════════════════════
+   DELETE EVENT  (cascade: activities + participations in transaction)
+   DELETE /api/v1/events/:eventId
+   Auth: required
+══════════════════════════════════════════════════════════ */
+export const deleteEvent = asynchandler(async (req, res) => {
+  const { eventId } = req.params;
+  if (!isValidId(eventId)) throw new ApiError(400, "Invalid eventId");
+
   const session = await mongoose.startSession();
-
   try {
-    const { eventId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(eventId)) {
-      return res.status(400).json({ message: "Invalid eventId" });
-    }
-
     session.startTransaction();
 
-    const event = await Event.findByIdAndDelete(eventId, {
-      session,
-    });
-
+    const event = await Event.findByIdAndDelete(eventId, { session });
     if (!event) {
       await session.abortTransaction();
-      return res.status(404).json({ message: "Event not found" });
+      throw new ApiError(404, "Event not found");
     }
 
-    await EventDay.deleteMany({ eventId }, { session });
+    await Activity.deleteMany({ eventId }, { session });
+    await EventParticipation.deleteMany({ eventId }, { session });
 
     await session.commitTransaction();
-
-    return res.status(200).json({
-      message: "Event and related days deleted successfully",
-    });
-  } catch (error) {
+    return res.status(200).json(new ApiResponse(200, null, "Event, activities and participations deleted"));
+  } catch (err) {
     await session.abortTransaction();
-    return res.status(500).json({
-      message: "Failed to delete event",
-      error: error.message,
-    });
+    throw err;
   } finally {
     session.endSession();
   }
-};
-
-/* ======================================================
-   PUBLISH EVENT
-====================================================== */
-export const publishEvent = async (req, res) => {
-  try {
-    const { eventId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(eventId)) {
-      return res.status(400).json({ message: "Invalid eventId" });
-    }
-
-    const updated = await Event.findByIdAndUpdate(
-      eventId,
-      { status: "published" },
-      { new: true }
-    );
-
-    if (!updated) {
-      return res.status(404).json({ message: "Event not found" });
-    }
-
-    return res.status(200).json({
-      message: "Event published successfully",
-      data: updated,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Failed to publish event",
-      error: error.message,
-    });
-  }
-};
+});

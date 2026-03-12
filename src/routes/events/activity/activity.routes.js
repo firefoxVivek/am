@@ -1,31 +1,29 @@
 import express from "express";
 import {
   createActivity,
-  getActivity,
+  getActivitiesByEvent,
+  getEventSchedule,
   getActivityById,
-  updateActivity,getEventSchedule,
+  updateActivity,
   deleteActivity,
 } from "../../../controllers/events/Activity/Activity.controller.js";
+import { verifyJWT } from "../../../middleware/auth.middleware.js";
 
 const router = express.Router();
 
 /**
- * Base: /api/events/:eventId/days
+ * Base: /api/v1/events/activity
+ * Rule: /schedule must come before /:activityId
  */
 
-/* ---------------- Create Day ---------------- */
-router.post("/:eventId/days", createActivity);
+// ── Public ──────────────────────────────────────────────
+router.get("/:eventId/schedule",                      getEventSchedule);     // GET  /activity/:eventId/schedule
+router.get("/:eventId/activities",                    getActivitiesByEvent); // GET  /activity/:eventId/activities?status=&category=
+router.get("/:eventId/activities/:activityId",        getActivityById);      // GET  /activity/:eventId/activities/:activityId
 
-/* ---------------- Get All Days of Event ---------------- */
-router.get("/:eventId/days", getActivity);
-router.get('/:eventId/schedule',getEventSchedule);
-/* ---------------- Get Single Day ---------------- */
-router.get("/:eventId/activities/:activityId", getActivityById);
-
-/* ---------------- Update Day ---------------- */
-router.patch("/:eventId/days/:dayId", updateActivity);
-
-/* ---------------- Delete Day ---------------- */
-router.delete("/:eventId/days/:activityId", deleteActivity);
+// ── Protected writes ────────────────────────────────────
+router.post("/:eventId/activities",                   verifyJWT, createActivity);  // POST   /activity/:eventId/activities
+router.patch("/:eventId/activities/:activityId",      verifyJWT, updateActivity);  // PATCH  /activity/:eventId/activities/:activityId
+router.delete("/:eventId/activities/:activityId",     verifyJWT, deleteActivity);  // DELETE /activity/:eventId/activities/:activityId
 
 export default router;

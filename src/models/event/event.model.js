@@ -1,77 +1,43 @@
 import mongoose from "mongoose";
-
 const { Schema } = mongoose;
 
-const eventSchema = new Schema(
+const EventSchema = new Schema(
   {
-    // 1. Event Banner
-    banner: {
-      type: String, // URL or storage path
-      required: true,
-      trim: true,
-    },
-
-    // 2. Event Name
     name: {
       type: String,
       required: true,
       trim: true,
       maxlength: 150,
     },
-
-    // 3. Venue
-    venue: {
+    banner: {
       type: String,
       required: true,
       trim: true,
     },
-
-    // 4. Participation Fees
-    participationFee: {
-      type: Number,
-      required: true,
-      min: 0,
-      default: 0,
-    },
-
-    // 5. Event Type
-    eventType: {
+    description: {
       type: String,
       required: true,
-      enum: [
-        "workshop",
-        "competition",
-        "seminar",
-        "conference",
-        "cultural",
-        "sports",
-        "other",
-      ],
-    },
-
-    // 6. Event About
-    about: {
-      type: String,
-      required: true,
-      trim: true,
       maxlength: 5000,
     },
-
-    // 7. Number of Days
-    numberOfDays: {
-      type: Number,
+    type: {
+      type: String,
+      enum: ["single_day", "multi_day", "fest"],
       required: true,
-      min: 1,
+      index: true,
     },
-
-    // 8. Prize Pool
-    prizePool: {
-      type: Number,
-      min: 0,
-      default: 0,
+    genre: {
+      type: String,
+      enum: ["technical", "cultural", "sports", "academic", "entrepreneurship", "mixed"],
+      required: true,
+      index: true,
     },
-
-    // 9. Starting Date & Ending Date
+    location: {
+      venue:   { type: String, trim: true, default: null },
+      city:    { type: String, trim: true, default: null },
+      state:   { type: String, trim: true, default: null },
+      country: { type: String, trim: true, default: "India" },
+      mapLink: { type: String, trim: true, default: null },
+    },
     startDate: {
       type: Date,
       required: true,
@@ -80,38 +46,33 @@ const eventSchema = new Schema(
       type: Date,
       required: true,
     },
-
-    // 10. Last Date of Registration
-    lastRegistrationDate: {
-      type: Date,
-      required: true,
-    },
-
-    // 11. Club ID (Indexed)
     clubId: {
       type: Schema.Types.ObjectId,
       ref: "Club",
       required: true,
       index: true,
     },
-
-    // 12. Institution ID (Optional but Indexed)
     institutionId: {
       type: Schema.Types.ObjectId,
       ref: "Institution",
-      index: true,
       default: null,
     },
-
-    // 13. Council ID (Optional but Indexed)
     councilId: {
       type: Schema.Types.ObjectId,
       ref: "Council",
-      index: true,
       default: null,
     },
-
-    // Status (useful for moderation / lifecycle)
+    // Denormalized — maintained by Activity and Participation hooks
+    totalActivities: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalRegistrations: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     status: {
       type: String,
       enum: ["draft", "published", "completed", "cancelled"],
@@ -119,14 +80,15 @@ const eventSchema = new Schema(
       index: true,
     },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-// 🔹 Compound indexes (optional but recommended)
-eventSchema.index({ startDate: 1, endDate: 1 });
-eventSchema.index({ clubId: 1, startDate: 1 });
+// Compound indexes
+EventSchema.index({ name: "text", description: "text" });
+EventSchema.index({ startDate: 1, endDate: 1 });
+EventSchema.index({ clubId: 1, startDate: 1 });
+EventSchema.index({ clubId: 1, status: 1 });
+EventSchema.index({ genre: 1, status: 1, startDate: 1 });
 
-export const   Event = mongoose.model("Event", eventSchema);
+export const Event = mongoose.model("Event", EventSchema);
 export default Event;

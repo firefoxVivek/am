@@ -1,18 +1,18 @@
 // /config/firebase-admin.js
-// import admin from "firebase-admin";
+import admin from "firebase-admin";
 
-// console.log("🔥 Firebase Admin apps before init:", admin.apps.length);
+console.log("🔥 Firebase Admin apps before init:", admin.apps.length);
 
-// if (!admin.apps.length) {
-//   admin.initializeApp({
-//     credential: admin.credential.applicationDefault(),
-//   });
-//   console.log("✅ Firebase Admin initialized");
-// } else {
-//   console.log("✅ Firebase Admin already initialized");
-// }
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.applicationDefault(),
+  });
+  console.log("✅ Firebase Admin initialized");
+} else {
+  console.log("✅ Firebase Admin already initialized");
+}
 
-// export default admin;
+export default admin;
 // import admin from "firebase-admin";
 // import fs from "fs";
 
@@ -29,22 +29,22 @@
 // }
 
 // export default admin;
-import admin from "firebase-admin";
+// import admin from "firebase-admin";
 
-console.log("🔥 Firebase Admin apps before init:", admin.apps.length);
+// console.log("🔥 Firebase Admin apps before init:", admin.apps.length);
 
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-    }),
-  });
+// if (!admin.apps.length) {
+//   admin.initializeApp({
+//     credential: admin.credential.cert({
+//       projectId: process.env.FIREBASE_PROJECT_ID,
+//       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+//       privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+//     }),
+//   });
 
-  console.log("✅ Firebase Admin initialized");
-} else {
-  console.log("✅ Firebase Admin already initialized");
-}
+//   console.log("✅ Firebase Admin initialized");
+// } else {
+//   console.log("✅ Firebase Admin already initialized");
+// }
 
-export default admin;
+// export default admin;

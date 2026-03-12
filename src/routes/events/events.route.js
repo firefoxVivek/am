@@ -1,36 +1,35 @@
 import express from "express";
 import {
   createEvent,
-  getEvents,
+  getEventsByClub,
+  getUpcomingClubEvents,
+  searchEvents,
   getEventById,
   updateEvent,
-  deleteEvent,
   publishEvent,
-  getUpcomingClubEvents
+  deleteEvent,
 } from "../../controllers/events/events.controller.js";
+import { verifyJWT } from "../../middleware/auth.middleware.js";
 
 const router = express.Router();
 
 /**
- * Base: /api/events
+ * Base: /api/v1/events
+ * Rule: specific static paths MUST come before /:eventId param routes
  */
 
-/* ---------------- Create Event ---------------- */
-router.post("/create", createEvent);
+// ── Public ──────────────────────────────────────────────
+router.get("/search",                   searchEvents);           // GET  /events/search?q=
+router.get("/club/:clubId",             getEventsByClub);        // GET  /events/club/:clubId
+router.get("/club/:clubId/upcoming",    getUpcomingClubEvents);  // GET  /events/club/:clubId/upcoming
 
-/* ---------------- Get Events (list / filters) ---------------- */
-router.get("/club/:clubId", getEvents);
+// ── Single event (param route — after all static routes) ─
+router.get("/:eventId",                 getEventById);           // GET  /events/:eventId
 
-/* ---------------- Get Single Event ---------------- */
-router.get("/:eventId", getEventById);
-router.get("/club/:clubId/upcoming",getUpcomingClubEvents);
-/* ---------------- Update Event (partial) ---------------- */
-router.patch("/:eventId", updateEvent);
-
-/* ---------------- Delete Event ---------------- */
-router.delete("/:eventId", deleteEvent);
-
-/* ---------------- Publish Event ---------------- */
-router.patch("/:eventId/publish", publishEvent);
+// ── Protected writes ────────────────────────────────────
+router.post("/create",                  verifyJWT, createEvent);       // POST   /events/create
+router.patch("/:eventId",               verifyJWT, updateEvent);       // PATCH  /events/:eventId
+router.patch("/:eventId/publish",       verifyJWT, publishEvent);      // PATCH  /events/:eventId/publish
+router.delete("/:eventId",              verifyJWT, deleteEvent);       // DELETE /events/:eventId
 
 export default router;

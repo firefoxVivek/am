@@ -1,211 +1,218 @@
 import mongoose from "mongoose";
+import { Activity }           from "../../../models/event/Activity/masterday.model.js";
+import { EventParticipation } from "../../../models/event/participation.model.js";
+import { Event }              from "../../../models/event/event.model.js";
+import admin                  from "../../../../config/firebase.js";
+import { ApiError }           from "../../../utils/ApiError.js";
+import { ApiResponse }        from "../../../utils/ApiResponse.js";
+import { asynchandler }       from "../../../utils/asynchandler.js";
 
-import Activity from "../../../models/event/Activity/masterday.model.js";
+const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
+/* ══════════════════════════════════════════════════════════
+   CREATE ACTIVITY
+   POST /api/v1/events/activity/:eventId/activities
+   Auth: required
+   Body: activityName, category, dayNumber, date, registrationDeadline,
+         venueLogistics{venueName, ...}, [description, participationFee,
+         maxParticipants, teamAllowed, teamSize, scheduling[], 
+         awardsRecognition[], rulesGuidelines[], contactsSupport[]]
+══════════════════════════════════════════════════════════ */
+export const createActivity = asynchandler(async (req, res) => {
+  const { eventId } = req.params;
+  if (!isValidId(eventId)) throw new ApiError(400, "Invalid eventId");
 
-export const createActivity = async (req, res) => {
-  try {
-    const { eventId } = req.params;
+  const { activityName, category, dayNumber, date, registrationDeadline, venueLogistics } = req.body;
 
-
-    const newActivityDoc = await Activity.create({
-      eventId,
-      ...req.body,
-    });
-
-    return res.status(201).json({
-      message: "New activity document created",
-      data: newActivityDoc,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Failed to create document",
-      error: error.message,
-    });
+  if (!activityName || !category || !dayNumber || !date || !registrationDeadline || !venueLogistics?.venueName) {
+    throw new ApiError(400, "activityName, category, dayNumber, date, registrationDeadline, and venueLogistics.venueName are required");
   }
-};
 
-export const getActivity = async (req, res) => {
-  try {
-    const { eventId } = req.params;
+  // Verify event exists and is not cancelled
+  const event = await Event.findById(eventId).select("status name").lean();
+  if (!event) throw new ApiError(404, "Event not found");
+  if (event.status === "cancelled") throw new ApiError(400, "Cannot add activity to a cancelled event");
 
-    if (!mongoose.Types.ObjectId.isValid(eventId)) {
-      return res.status(400).json({ message: "Invalid eventId" });
-    }
-
-    const days = await Activity.find({ eventId }).sort({ dayNumber: 1 }).lean();
-
-    return res.status(200).json({
-      count: days.length,
-      data: days,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Failed to fetch event days",
-      error: error.message,
-    });
+  if (new Date(registrationDeadline) > new Date(date)) {
+    throw new ApiError(400, "registrationDeadline must be before or on the activity date");
   }
-};
-export const getEventSchedule = async (req, res) => {
-  try {
-    const { eventId } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(eventId)) {
-      return res.status(400).json({ message: "Invalid Event ID" });
-    }
+  const activity = await Activity.create({ eventId, ...req.body });
 
-    const schedule = await Activity.aggregate([
-      {
-        // 1. Filter activities for this specific event
-        $match: { eventId: new mongoose.Types.ObjectId(eventId) }
+  // FCM — notify event topic if event is published (non-blocking)
+  if (event.status === "published") {
+    admin.messaging().send({
+      topic: `event_${eventId}`,
+      notification: { title: "New Activity Added!", body: `${activityName} has been added` },
+      data: { eventId, activityId: activity._id.toString(), type: "ACTIVITY_CREATED" },
+    }).catch((e) => console.error("FCM createActivity:", e.message));
+  }
+
+  return res.status(201).json(new ApiResponse(201, activity, "Activity created successfully"));
+});
+
+/* ══════════════════════════════════════════════════════════
+   GET ALL ACTIVITIES FOR AN EVENT
+   GET /api/v1/events/activity/:eventId/activities
+   Query: status, category
+══════════════════════════════════════════════════════════ */
+export const getActivitiesByEvent = asynchandler(async (req, res) => {
+  const { eventId } = req.params;
+  if (!isValidId(eventId)) throw new ApiError(400, "Invalid eventId");
+
+  const { status, category } = req.query;
+  const filter = { eventId };
+  if (status)   filter.status   = status;
+  if (category) filter.category = category;
+
+  const activities = await Activity.find(filter).sort({ dayNumber: 1, date: 1 }).lean();
+  return res.status(200).json(new ApiResponse(200, { count: activities.length, activities }, "Activities fetched"));
+});
+
+/* ══════════════════════════════════════════════════════════
+   GET EVENT SCHEDULE  (grouped by dayNumber — public view)
+   GET /api/v1/events/activity/:eventId/schedule
+══════════════════════════════════════════════════════════ */
+export const getEventSchedule = asynchandler(async (req, res) => {
+  const { eventId } = req.params;
+  if (!isValidId(eventId)) throw new ApiError(400, "Invalid eventId");
+
+  const schedule = await Activity.aggregate([
+    { $match: { eventId: new mongoose.Types.ObjectId(eventId) } },
+    {
+      $group: {
+        _id: "$dayNumber",
+        date: { $first: "$date" },
+        activities: {
+          $push: {
+            activityId:          "$_id",
+            activityName:        "$activityName",
+            category:            "$category",
+            status:              "$status",
+            participationFee:    "$participationFee",
+            registrationDeadline:"$registrationDeadline",
+            maxParticipants:     "$maxParticipants",
+            registrationsCount:  "$registrationsCount",
+            teamAllowed:         "$teamAllowed",
+            venueLogistics:      "$venueLogistics",
+            scheduling:          "$scheduling",
+          },
+        },
       },
-      {
-        // 2. Group by dayNumber and date
-        $group: {
-          _id: "$dayNumber",
-          date: { $first: "$date" }, // Capture the date for the day
-          metadata: {
-            $push: {
-              activityId: "$_id",
-              activityName: "$activityName"
-            }
-          }
-        }
+    },
+    {
+      $project: {
+        _id: 0,
+        dayNumber: "$_id",
+        date: 1,
+        activities: 1,
       },
-      {
-        // 3. Rename _id back to dayNumber and format output
-        $project: {
-          _id: 0,
-          dayNumber: "$_id",
-          date: 1,
-          metadata: 1
-        }
-      },
-      {
-        // 4. Sort by Day Number (Day 1, Day 2...)
-        $sort: { dayNumber: 1 }
-      }
-    ]);
+    },
+    { $sort: { dayNumber: 1 } },
+  ]);
 
-    return res.status(200).json({
-      success: true,
-      count: schedule.length,
-      data: schedule
-    });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Failed to fetch schedule",
-      error: error.message
-    });
+  return res.status(200).json(new ApiResponse(200, { count: schedule.length, schedule }, "Schedule fetched"));
+});
+
+/* ══════════════════════════════════════════════════════════
+   GET SINGLE ACTIVITY  (full detail)
+   GET /api/v1/events/activity/:eventId/activities/:activityId
+══════════════════════════════════════════════════════════ */
+export const getActivityById = asynchandler(async (req, res) => {
+  const { eventId, activityId } = req.params;
+  if (!isValidId(eventId) || !isValidId(activityId)) throw new ApiError(400, "Invalid ID");
+
+  const activity = await Activity.findOne({ _id: activityId, eventId }).lean();
+  if (!activity) throw new ApiError(404, "Activity not found");
+
+  return res.status(200).json(new ApiResponse(200, activity, "Activity fetched"));
+});
+
+/* ══════════════════════════════════════════════════════════
+   UPDATE ACTIVITY  (partial)
+   PATCH /api/v1/events/activity/:eventId/activities/:activityId
+   Auth: required
+   Note: eventId and registrationsCount cannot be changed
+══════════════════════════════════════════════════════════ */
+export const updateActivity = asynchandler(async (req, res) => {
+  const { eventId, activityId } = req.params;
+  if (!isValidId(eventId) || !isValidId(activityId)) throw new ApiError(400, "Invalid ID");
+
+  // Strip fields that must not be changed externally
+  const { eventId: _eId, registrationsCount, ...updates } = req.body;
+
+  if (updates.registrationDeadline && updates.date) {
+    if (new Date(updates.registrationDeadline) > new Date(updates.date)) {
+      throw new ApiError(400, "registrationDeadline must be before or on the activity date");
+    }
   }
-};
 
-export const getActivityById = async (req, res) => {
-  try {
-    const { activityId } = req.params;  
+  const updated = await Activity.findOneAndUpdate(
+    { _id: activityId, eventId },
+    { $set: updates },
+    { new: true, runValidators: true }
+  );
+  if (!updated) throw new ApiError(404, "Activity not found");
 
-  
-    if (!mongoose.Types.ObjectId.isValid(activityId)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid Activity ID format" 
-      });
-    }
-
-
-    const activity = await Activity.findById(activityId).lean();
-
-
-    if (!activity) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Activity not found" 
-      });
-    }
-
-
-    return res.status(200).json({
-      success: true,
-      data: activity
-    });
-
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Server error while fetching activity",
-      error: error.message,
-    });
+  // FCM — notify if schedule, date or venue changed (non-blocking)
+  if (updates.scheduling || updates.date || updates.venueLogistics) {
+    admin.messaging().send({
+      topic: `activity_${activityId}`,
+      notification: { title: "Activity Updated", body: `${updated.activityName} details have changed` },
+      data: { activityId, eventId, type: "ACTIVITY_UPDATED" },
+    }).catch((e) => console.error("FCM updateActivity:", e.message));
   }
-};
-/* ======================================================
-   UPDATE EVENT DAY (PARTIAL)
-====================================================== */
-export const updateActivity = async (req, res) => {
-  try {
-    const { dayId, eventId } = req.params;
 
-    if (
-      !mongoose.Types.ObjectId.isValid(dayId) ||
-      !mongoose.Types.ObjectId.isValid(eventId)
-    ) {
-      return res.status(400).json({ message: "Invalid ID" });
+  return res.status(200).json(new ApiResponse(200, updated, "Activity updated"));
+});
+
+/* ══════════════════════════════════════════════════════════
+   DELETE ACTIVITY  (cascade: participations — in transaction)
+   DELETE /api/v1/events/activity/:eventId/activities/:activityId
+   Auth: required
+══════════════════════════════════════════════════════════ */
+export const deleteActivity = asynchandler(async (req, res) => {
+  const { eventId, activityId } = req.params;
+  if (!isValidId(eventId) || !isValidId(activityId)) throw new ApiError(400, "Invalid ID");
+
+  const session = await mongoose.startSession();
+  try {
+    session.startTransaction();
+
+    const deleted = await Activity.findOneAndDelete({ _id: activityId, eventId }, { session });
+    if (!deleted) {
+      await session.abortTransaction();
+      throw new ApiError(404, "Activity not found");
     }
 
-    const updatedDay = await Activity.findOneAndUpdate(
-      { _id: dayId, eventId },
-      { $set: req.body },
-      {
-        new: true,
-        runValidators: true,
-      }
+    // Cascade: delete all participation records for this activity
+    const { deletedCount } = await EventParticipation.deleteMany({ activityId }, { session });
+
+    // Decrement event.totalRegistrations by the number of participations removed
+    if (deletedCount > 0) {
+      await Event.findByIdAndUpdate(
+        eventId,
+        { $inc: { totalRegistrations: -deletedCount } },
+        { session }
+      );
+    }
+
+    await session.commitTransaction();
+
+    // FCM — cancellation push (non-blocking, after transaction)
+    admin.messaging().send({
+      topic: `activity_${activityId}`,
+      notification: { title: "Activity Cancelled", body: `${deleted.activityName} has been removed` },
+      data: { activityId, eventId, type: "ACTIVITY_DELETED" },
+    }).catch((e) => console.error("FCM deleteActivity:", e.message));
+
+    return res.status(200).json(
+      new ApiResponse(200, null, `Activity deleted along with ${deletedCount} participation(s)`)
     );
-
-    if (!updatedDay) {
-      return res.status(404).json({ message: "Event day not found" });
-    }
-
-    return res.status(200).json({
-      message: "Event day updated successfully",
-      data: updatedDay,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Failed to update event day",
-      error: error.message,
-    });
+  } catch (err) {
+    await session.abortTransaction();
+    throw err;
+  } finally {
+    session.endSession();
   }
-};
-
-/* ======================================================
-   DELETE EVENT DAY
-====================================================== */
-export const deleteActivity = async (req, res) => {
-  try {
-    const { activityId, eventId } = req.params;
-
-    if (
-      !mongoose.Types.ObjectId.isValid(activityId) ||
-      !mongoose.Types.ObjectId.isValid(eventId)
-    ) {
-      return res.status(400).json({ message: "Invalid ID" });
-    }
-
-    const deletedDay = await Activity.findOneAndDelete({
-      _id: activityId,
-      eventId,
-    });
-
-    if (!deletedDay) {
-      return res.status(404).json({ message: "Event day not found" });
-    }
-
-    return res.status(200).json({
-      message: "Event day deleted successfully",
-    });
-  } catch (error) {
-    return res.status(500).json({
-      message: "Failed to delete event day",
-      error: error.message,
-    });
-  }
-};
+});
