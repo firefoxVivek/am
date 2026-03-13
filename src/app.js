@@ -41,7 +41,7 @@ import uploadRoutes from "./routes/others/upload.routes.js";
 import Activity from "./routes/events/activity/activity.routes.js";
 import Participation from "./routes/events/activity/participation.route.js";
 import Profile from "./routes/profile/profile.routes.js";
-import PublicProfile from "./routes/profile/publicProfile.routes.js";
+import { publicProfileRouter, freelancerRoutes } from "./routes/profile/publicProfile.routes.js";
 import Connections from "./routes/connections/userToUser.route.js";
 import Membership from "./routes/connections/userToClub.route.js";
 import IProfile from "./routes/institution/profile.routes.js";
@@ -54,7 +54,8 @@ import messages from "./routes/connections/message.route.js";
 
 app.use("/api/v1/auth", userRouter);
 app.use("/api/v1/profile", Profile);
-app.use("/api/v1/profile/public", PublicProfile );
+app.use("/api/v1/profile/public", publicProfileRouter);
+app.use("/api/v1/freelancers",    freelancerRoutes);
 app.use("/api/v1/club", Club);
 app.use("/api/v1/club/posts", ClubPosts);
 app.use("/api/v1/events",Events);

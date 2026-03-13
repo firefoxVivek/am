@@ -1,96 +1,120 @@
-
-import admin from "../../../config/firebase.js";
-import ServiceCard from "../../models/institution/serviceCard.model.js";
+import mongoose from "mongoose";
+import admin        from "../../../config/firebase.js";
+import ServiceCard  from "../../models/institution/serviceCard.model.js";
 import { Institution } from "../../models/Profile/institution.model.js";
-import { ApiError } from "../../utils/ApiError.js";
+import { ApiError }    from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { asynchandler } from "../../utils/asynchandler.js";
 
-/* --- Create a New Service Card --- */
+/* ---------------------------------------------------------------
+   CREATE SERVICE CARD
+   POST /api/v1/institution/services/
+   Only the institution's own founder can create cards for it.
+--------------------------------------------------------------- */
 export const createServiceCard = asynchandler(async (req, res) => {
-  const {
-    title,
-    about,
-    imageUrl,
-    customFields,
-    itemsList,
-    institutionId
-  } = req.body;
+  const { title, about, imageUrl, customFields, itemsList, institutionId } = req.body;
 
-  if (!title) {
+  if (!title?.trim()) {
     throw new ApiError(400, "Title is required");
   }
 
   if (!institutionId) {
-    throw new ApiError(400, "Institution ID is required");
+    throw new ApiError(400, "institutionId is required");
   }
 
-  // 1️⃣ Ensure institution exists
-  const institution = await Institution.findById(institutionId).select("_id name");
+  if (!mongoose.Types.ObjectId.isValid(institutionId)) {
+    throw new ApiError(400, "Invalid institution ID");
+  }
+
+  // Verify institution exists AND belongs to this user
+  const institution = await Institution.findOne({
+    _id:       institutionId,
+    founderId: req.user._id,        // ownership check — was missing before
+    status:    "active",
+  }).select("_id name").lean();
 
   if (!institution) {
-    throw new ApiError(404, "Institution not found");
+    throw new ApiError(403, "Institution not found or you are not authorized to add services to it");
   }
 
-  // 2️⃣ Create service card
   const serviceCard = await ServiceCard.create({
-    providerId: req.user._id, // Authenticated user
-    institutionId,
-    title,
+    providerId:   req.user._id,
+    institutionId,                  // now correctly stored
+    title:        title.trim(),
     about,
     imageUrl,
     customFields,
     itemsList,
   });
 
-  // 3️⃣ Prepare FCM topic
-  const topic = `ins_${institutionId}`;
-
-  // 4️⃣ Send notification to institution subscribers
-  await admin.messaging().send({
-    topic,
+  // Notify institution subscribers (non-blocking)
+  admin.messaging().send({
+    topic: `institution_${institutionId}`,
     notification: {
-      title: `New update from ${institution.name}`,
-      body: title,
+      title: `New service from ${institution.name}`,
+      body:  title.trim(),
     },
     data: {
-      type: "SERVICE_CREATED",
-      serviceId: serviceCard._id.toString(),
+      type:          "SERVICE_CREATED",
+      serviceId:     serviceCard._id.toString(),
       institutionId: institutionId.toString(),
     },
-  });
+  }).catch((e) => console.error("[FCM] createServiceCard:", e.message));
 
-  return res.status(201).json(
-    new ApiResponse(
-      201,
-      serviceCard,
-      "Service Card created and notification sent successfully"
-    )
-  );
+  return res
+    .status(201)
+    .json(new ApiResponse(201, serviceCard, "Service card created successfully"));
 });
 
-/* --- Fetch All Cards for a Specific Institution (Public) --- */
+/* ---------------------------------------------------------------
+   GET ALL CARDS FOR AN INSTITUTION (Public)
+   GET /api/v1/institution/services/institution/:institutionId
+   Previously queried by providerId — always returned 0 results.
+   Now correctly queries by institutionId.
+--------------------------------------------------------------- */
 export const getInstitutionCards = asynchandler(async (req, res) => {
   const { institutionId } = req.params;
 
-  // Uses the index { providerId: 1, createdAt: -1 }
-  const cards = await ServiceCard.find({ providerId: institutionId })
-    .sort({ createdAt: -1 });
+  if (!mongoose.Types.ObjectId.isValid(institutionId)) {
+    throw new ApiError(400, "Invalid institution ID");
+  }
 
-  return res.status(200).json(
-    new ApiResponse(200, cards, "Cards fetched successfully")
-  );
+  // Uses the index { institutionId: 1, isActive: 1, createdAt: -1 }
+  const cards = await ServiceCard.find({
+    institutionId,
+    isActive: true,
+  }).sort({ createdAt: -1 }).lean();
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, { count: cards.length, cards }, "Service cards fetched successfully"));
 });
 
-/* --- Update a Service Card (Owner Only) --- */
+/* ---------------------------------------------------------------
+   UPDATE SERVICE CARD (Owner Only)
+   PATCH /api/v1/institution/services/:id
+--------------------------------------------------------------- */
 export const updateServiceCard = asynchandler(async (req, res) => {
-  const { id } = req.params; // The MongoDB _id of the card
-  const updates = req.body;
+  const { id } = req.params;
 
-  // Find and update ONLY if the card belongs to the logged-in user
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new ApiError(400, "Invalid card ID");
+  }
+
+  // Whitelist updatable fields — prevents overwriting providerId or institutionId
+  const ALLOWED = ["title", "about", "imageUrl", "customFields", "itemsList"];
+  const safeUpdates = {};
+  for (const key of ALLOWED) {
+    if (req.body[key] !== undefined) safeUpdates[key] = req.body[key];
+  }
+
+  if (Object.keys(safeUpdates).length === 0) {
+    throw new ApiError(400, "No valid fields provided for update");
+  }
+
   const card = await ServiceCard.findOneAndUpdate(
     { _id: id, providerId: req.user._id },
-    { $set: updates },
+    { $set: safeUpdates },
     { new: true, runValidators: true }
   );
 
@@ -98,25 +122,34 @@ export const updateServiceCard = asynchandler(async (req, res) => {
     throw new ApiError(404, "Card not found or you are not authorized to edit it");
   }
 
-  return res.status(200).json(
-    new ApiResponse(200, card, "Card updated successfully")
-  );
+  return res
+    .status(200)
+    .json(new ApiResponse(200, card, "Service card updated successfully"));
 });
 
-/* --- Delete a Service Card (Owner Only) --- */
+/* ---------------------------------------------------------------
+   DELETE SERVICE CARD (Owner Only)
+   DELETE /api/v1/institution/services/:id
+   Soft-delete — sets isActive: false so existing bookings stay intact.
+--------------------------------------------------------------- */
 export const deleteServiceCard = asynchandler(async (req, res) => {
   const { id } = req.params;
 
-  const card = await ServiceCard.findOneAndDelete({
-    _id: id,
-    providerId: req.user._id
-  });
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new ApiError(400, "Invalid card ID");
+  }
+
+  const card = await ServiceCard.findOneAndUpdate(
+    { _id: id, providerId: req.user._id },
+    { $set: { isActive: false } },
+    { new: true }
+  );
 
   if (!card) {
     throw new ApiError(404, "Card not found or unauthorized");
   }
 
-  return res.status(200).json(
-    new ApiResponse(200, {}, "Card deleted successfully")
-  );
+  return res
+    .status(200)
+    .json(new ApiResponse(200, {}, "Service card removed successfully"));
 });

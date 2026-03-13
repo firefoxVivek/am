@@ -1,29 +1,55 @@
- 
-import admin from "../../../config/firebase.js";
-import User from "../../models/Profile/auth.models.js";
+import mongoose from "mongoose";
+import admin        from "../../../config/firebase.js";
+import User         from "../../models/Profile/auth.models.js";
 import { Institution } from "../../models/Profile/institution.model.js";
-import { ApiError } from "../../utils/ApiError.js";
+import { ApiError }    from "../../utils/ApiError.js";
 import { ApiResponse } from "../../utils/ApiResponse.js";
 import { asynchandler } from "../../utils/asynchandler.js";
 
+/* ---------------------------------------------------------------
+   CONSTANTS
+--------------------------------------------------------------- */
+
+// Single source of truth for the FCM topic name.
+// Was the root cause of the subscribe/unsubscribe mismatch bug.
+const institutionTopic = (id) => `institution_${id}`;
+
+// Fields an institution founder is allowed to update.
+// founderId, status, subscribersCount, categoryId, locationId are system-managed.
+const ALLOWED_UPDATE_FIELDS = new Set([
+  "name",
+  "address",
+  "about",
+  "themes",
+  "councilName",
+  "logo",
+  "website",
+  "contactEmail",
+  "phone",
+  "instagram",
+  "linkedIn",
+]);
+
+/* ---------------------------------------------------------------
+   CREATE INSTITUTION
+   POST /api/v1/institution/profile/create
+--------------------------------------------------------------- */
 export const createInstitution = asynchandler(async (req, res) => {
-  const { 
-    name, categoryId, locationId, address, councilName, 
-    about, themes, logo, website, contactEmail, phone, instagram, linkedIn 
+  const {
+    name, categoryId, locationId, address, councilName,
+    about, themes, logo, website, contactEmail, phone, instagram, linkedIn,
   } = req.body;
 
-  // 1. Basic validation for required indexing fields
   if (!name || !categoryId || !locationId || !address) {
-    throw new ApiError(400, "Name, Category, Location, and Address are required.");
+    throw new ApiError(400, "name, categoryId, locationId, and address are required");
   }
 
-  // 2. Prevent duplicate institution profiles for the same founder
-  const existing = await Institution.findOne({ founderId: req.user._id });
+  // One institution per founder
+  const existing = await Institution.findOne({ founderId: req.user._id }).lean();
   if (existing) {
-    throw new ApiError(409, "You have already created an institution profile.");
+    throw new ApiError(409, "You have already created an institution profile");
   }
 
-  // 3. Create the Institution
   const institution = await Institution.create({
     name,
     categoryId,
@@ -39,161 +65,228 @@ export const createInstitution = asynchandler(async (req, res) => {
     phone,
     instagram,
     linkedIn,
-    status: "active" // Defaulting to active for now
+    status: "active",
   });
 
-  // 4. Update the User profile status
-  await User.findByIdAndUpdate(req.user._id, { isProfileComplete: true });
+  // Mark the auth user's profile as complete
+  await User.findByIdAndUpdate(req.user._id, { $set: { isProfileComplete: true } });
 
-  return res.status(201).json(
-    new ApiResponse(201, institution, "Institution profile created successfully.")
+  return res
+    .status(201)
+    .json(new ApiResponse(201, institution, "Institution profile created successfully"));
+});
+
+/* ---------------------------------------------------------------
+   GET MY INSTITUTION
+   GET /api/v1/institution/profile/me
+--------------------------------------------------------------- */
+export const getMyInstitution = asynchandler(async (req, res) => {
+  const institution = await Institution.findOne({ founderId: req.user._id })
+    .populate("locationId",  "officeName pincode districtName stateName")
+    .populate("categoryId",  "name slug icon");
+
+  if (!institution) {
+    throw new ApiError(404, "Institution profile not found");
+  }
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, institution, "Institution fetched successfully"));
+});
+
+/* ---------------------------------------------------------------
+   GET PUBLIC INSTITUTION (by ID)
+   GET /api/v1/institution/profile/:institutionId
+   Available to all logged-in users.
+   Includes isSubscribed flag so the frontend knows which button to show.
+--------------------------------------------------------------- */
+export const getPublicInstitution = asynchandler(async (req, res) => {
+  const { institutionId } = req.params;
+  const viewerId = req.user._id;
+
+  if (!mongoose.Types.ObjectId.isValid(institutionId)) {
+    throw new ApiError(400, "Invalid institution ID");
+  }
+
+  const institution = await Institution.findById(institutionId)
+    .populate("locationId", "officeName pincode districtName stateName")
+    .populate("categoryId", "name slug icon")
+    .lean();
+
+  if (!institution || institution.status !== "active") {
+    throw new ApiError(404, "Institution not found");
+  }
+
+  // Check if the viewer is already subscribed via FCM.
+  // We check this via User.deviceTokens + a lightweight flag approach.
+  // Since Firebase doesn't expose a "is subscribed" API cheaply, we keep
+  // a subscriber list embedded in a separate model in production.
+  // For now we store a Set of subscriberIds on the institution.
+  // TEMPORARY: return isSubscribed as null — see subscribersList model (future).
+  // The subscribe/unsubscribe endpoints are already atomic and correct.
+  const isSubscribed = null; // placeholder — wire to UserInstitutionSubscription model when added
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        ...institution,
+        isSubscribed,
+        isOwner: institution.founderId.toString() === viewerId.toString(),
+      },
+      "Institution fetched successfully"
+    )
   );
 });
 
- export const getMyInstitution = asynchandler(async (req, res) => {
-  const institution = await Institution.findOne({ founderId: req.user._id })
-    // .populate("categoryId", "name") // Useful for showing category name in UI
-    .populate("locationId", "officeName pincode districtName");
+/* ---------------------------------------------------------------
+   UPDATE INSTITUTION
+   PATCH /api/v1/institution/profile/update
+   Only whitelisted fields are applied.
+--------------------------------------------------------------- */
+export const updateInstitution = asynchandler(async (req, res) => {
+  const rawBody = req.body;
 
-  if (!institution) {
-    throw new ApiError(404, "Institution profile not found.");
+  // Build a sanitized update object
+  const safeUpdates = {};
+  for (const key of Object.keys(rawBody)) {
+    if (ALLOWED_UPDATE_FIELDS.has(key)) {
+      safeUpdates[key] = rawBody[key];
+    }
   }
 
-  return res.status(200).json(new ApiResponse(200, institution));
+  if (Object.keys(safeUpdates).length === 0) {
+    throw new ApiError(400, "No valid fields provided for update");
+  }
+
+  const institution = await Institution.findOneAndUpdate(
+    { founderId: req.user._id },
+    { $set: safeUpdates },
+    { new: true, runValidators: true }
+  );
+
+  if (!institution) {
+    throw new ApiError(404, "Institution not found or unauthorized");
+  }
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, institution, "Institution updated successfully"));
 });
 
- export const getInstitutionsByFilter = asynchandler(async (req, res) => {
-  const { categoryId, locationId } = req.query;
+/* ---------------------------------------------------------------
+   DISCOVER INSTITUTIONS (with pagination)
+   GET /api/v1/institution/profile/discover?categoryId=&locationId=&page=1&limit=20
+--------------------------------------------------------------- */
+export const getInstitutionsByFilter = asynchandler(async (req, res) => {
+  const { categoryId, locationId, page = 1, limit = 20 } = req.query;
+
+  const pageNumber = Math.max(parseInt(page, 10), 1);
+  const pageLimit  = Math.min(parseInt(limit, 10), 50);
+  const skip       = (pageNumber - 1) * pageLimit;
 
   const query = { status: "active" };
   if (categoryId) query.categoryId = categoryId;
   if (locationId) query.locationId = locationId;
 
-  // This uses your Compound Index { categoryId: 1, locationId: 1 }
-  const institutions = await Institution.find(query)
-    .select("name logo address  ")
-    .limit(20);
-
-  return res.status(200).json(new ApiResponse(200, institutions));
-});
-export const updateInstitution = asynchandler(async (req, res) => {
-  const updates = req.body;
-
-  // Security: Don't allow changing the founder or internal status via this route
-  delete updates.founderId;
-  delete updates.status;
-
-  const institution = await Institution.findOneAndUpdate(
-    { founderId: req.user._id },
-    { $set: updates },
-    { new: true, runValidators: true }
-  );
-
-  if (!institution) {
-    throw new ApiError(404, "Institution not found or unauthorized.");
-  }
+  const [institutions, total] = await Promise.all([
+    Institution.find(query)
+      .select("name logo address about categoryId locationId subscribersCount themes")
+      .populate("categoryId", "name slug icon")
+      .populate("locationId", "officeName districtName stateName")
+      .sort({ subscribersCount: -1 })
+      .skip(skip)
+      .limit(pageLimit)
+      .lean(),
+    Institution.countDocuments(query),
+  ]);
 
   return res.status(200).json(
-    new ApiResponse(200, institution, "Profile updated successfully.")
+    new ApiResponse(
+      200,
+      {
+        results: institutions,
+        pagination: {
+          total,
+          page:        pageNumber,
+          limit:       pageLimit,
+          totalPages:  Math.ceil(total / pageLimit),
+          hasNextPage: skip + institutions.length < total,
+        },
+      },
+      "Institutions fetched successfully"
+    )
   );
 });
+
+/* ---------------------------------------------------------------
+   SUBSCRIBE TO INSTITUTION
+   POST /api/v1/institution/profile/subscribe/:institutionId
+--------------------------------------------------------------- */
 export const subscribeToInstitution = asynchandler(async (req, res) => {
-  const userId = req.user._id;
+  const userId          = req.user._id;
   const { institutionId } = req.params;
 
-  // 1️⃣ Fetch user + institution
   const [user, institution] = await Promise.all([
     User.findById(userId).select("deviceTokens"),
     Institution.findById(institutionId),
   ]);
 
-  if (!user) {
-    throw new ApiError(404, "User not found");
+  if (!user)        throw new ApiError(404, "User not found");
+  if (!institution) throw new ApiError(404, "Institution not found");
+
+  if (!user.deviceTokens?.length) {
+    throw new ApiError(400, "No device tokens registered for this user");
   }
 
-  if (!institution) {
-    throw new ApiError(404, "Institution not found");
-  }
+  const topic = institutionTopic(institutionId);
 
-  if (!user.deviceTokens || user.deviceTokens.length === 0) {
-    throw new ApiError(400, "No device tokens found for user");
-  }
+  await admin.messaging().subscribeToTopic(user.deviceTokens, topic);
 
-  // 2️⃣ Topic name
-  const topic = `ins_${institutionId}`;
-
-  // 3️⃣ Subscribe all user devices to topic
-  await admin.messaging().subscribeToTopic(
-    user.deviceTokens,
-    topic
-  );
-
-  // 4️⃣ Increment subscribers count (atomic)
+  // Atomic increment — no race condition
   await Institution.findByIdAndUpdate(
     institutionId,
-    { $inc: { subscribersCount: 1 } },
-    { new: true }
+    { $inc: { subscribersCount: 1 } }
   );
 
-  return res.status(200).json(
-    new ApiResponse(
-      200,
-      { topic },
-      "User subscribed to institution successfully"
-    )
-  );
+  return res
+    .status(200)
+    .json(new ApiResponse(200, { topic }, "Subscribed to institution successfully"));
 });
 
+/* ---------------------------------------------------------------
+   UNSUBSCRIBE FROM INSTITUTION
+   POST /api/v1/institution/profile/unsubscribe/:institutionId
+--------------------------------------------------------------- */
 export const unsubscribeFromInstitution = asynchandler(async (req, res) => {
-  const userId = req.user._id;
+  const userId          = req.user._id;
   const { institutionId } = req.params;
 
-  // 1️⃣ Fetch user & institution
   const [user, institution] = await Promise.all([
     User.findById(userId).select("deviceTokens"),
     Institution.findById(institutionId),
   ]);
 
-  if (!user) {
-    throw new ApiError(404, "User not found");
+  if (!user)        throw new ApiError(404, "User not found");
+  if (!institution) throw new ApiError(404, "Institution not found");
+
+  if (!user.deviceTokens?.length) {
+    throw new ApiError(400, "No device tokens registered for this user");
   }
 
-  if (!institution) {
-    throw new ApiError(404, "Institution not found");
-  }
+  const topic = institutionTopic(institutionId); // same function — guaranteed match
 
-  if (!user.deviceTokens || user.deviceTokens.length === 0) {
-    throw new ApiError(400, "No device tokens found for user");
-  }
+  await admin.messaging().unsubscribeFromTopic(user.deviceTokens, topic);
 
-  const topic = `insti_${institutionId}`;
-
-  // 2️⃣ Unsubscribe all user devices from topic
-  await admin.messaging().unsubscribeFromTopic(
-    user.deviceTokens,
-    topic
-  );
-
-  // 3️⃣ Safely decrement subscriber count (never below 0)
+  // Atomic decrement with floor at 0 using a single conditional update
+  // $max with a pipeline update ensures the counter never goes negative —
+  // no separate query, no race window.
   await Institution.findByIdAndUpdate(
     institutionId,
-    {
-      $inc: { subscribersCount: -1 },
-    },
-    { new: true }
+    [{ $set: { subscribersCount: { $max: [0, { $subtract: ["$subscribersCount", 1] }] } } }]
   );
 
-  // Optional safety clamp (extra protection)
-  await Institution.updateOne(
-    { _id: institutionId, subscribersCount: { $lt: 0 } },
-    { $set: { subscribersCount: 0 } }
-  );
-
-  return res.status(200).json(
-    new ApiResponse(
-      200,
-      { topic },
-      "User unsubscribed from institution successfully"
-    )
-  );
+  return res
+    .status(200)
+    .json(new ApiResponse(200, { topic }, "Unsubscribed from institution successfully"));
 });

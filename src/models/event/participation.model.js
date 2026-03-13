@@ -9,7 +9,6 @@ const EventParticipationSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    // Users register per-activity (required — events are containers only)
     activityId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Activity",
@@ -38,14 +37,13 @@ const EventParticipationSchema = new mongoose.Schema(
       index: true,
     },
 
-    /* ── Team Info (used when activity.teamAllowed = true) ── */
+    /* ── Team Info ── */
     teamName: {
       type: String,
       trim: true,
       default: null,
     },
     teamMembers: {
-      // Snapshot of member names / college IDs at time of registration
       type: [String],
       default: [],
     },
@@ -86,35 +84,79 @@ EventParticipationSchema.index({ userId: 1, createdAt: -1 }, { name: "user_timel
 EventParticipationSchema.index({ activityId: 1, role: 1 },   { name: "activity_role" });
 EventParticipationSchema.index({ eventId: 1, userId: 1 },    { name: "event_user" });
 
-/* ── Hook: capture isNew BEFORE save (it flips to false after) ── */
+/* ---------------------------------------------------------------
+   PRE-HOOK
+   Capture isNew BEFORE save (it flips to false after save).
+--------------------------------------------------------------- */
+
 EventParticipationSchema.pre("save", function (next) {
   this._wasNewDoc = this.isNew;
   next();
 });
 
-/* ── Hook: increment counters after new registration ── */
+/* ---------------------------------------------------------------
+   POST-HOOK: new registration
+   Increments:
+     Activity.registrationsCount
+     Event.totalRegistrations
+     UserProfile.totalParticipations   ← NEW
+--------------------------------------------------------------- */
+
 EventParticipationSchema.post("save", async function (doc) {
-  if (doc._wasNewDoc) {
-    await mongoose.model("Activity")
-      .findByIdAndUpdate(doc.activityId, { $inc: { registrationsCount: 1 } })
-      .catch((e) => console.error("registrationsCount inc failed:", e.message));
-    await mongoose.model("Event")
-      .findByIdAndUpdate(doc.eventId, { $inc: { totalRegistrations: 1 } })
-      .catch((e) => console.error("totalRegistrations inc failed:", e.message));
-  }
+  if (!doc._wasNewDoc) return;
+
+  const [Activity, Event, UserProfile] = [
+    mongoose.model("Activity"),
+    mongoose.model("Event"),
+    mongoose.model("UserProfile"),
+  ];
+
+  await Promise.all([
+    Activity.findByIdAndUpdate(doc.activityId, { $inc: { registrationsCount: 1 } })
+      .catch((e) => console.error("[Participation hook] registrationsCount inc:", e.message)),
+
+    Event.findByIdAndUpdate(doc.eventId, { $inc: { totalRegistrations: 1 } })
+      .catch((e) => console.error("[Participation hook] totalRegistrations inc:", e.message)),
+
+    UserProfile.findOneAndUpdate(
+      { userId: doc.userId },
+      { $inc: { totalParticipations: 1 } }
+    ).catch((e) => console.error("[Participation hook] totalParticipations inc:", e.message)),
+  ]);
 });
 
-/* ── Hook: decrement counters after delete ── */
+/* ---------------------------------------------------------------
+   POST-HOOK: registration deleted
+   Decrements all three counters with a $gt: 0 guard so they
+   never go negative.
+--------------------------------------------------------------- */
+
 EventParticipationSchema.post("findOneAndDelete", async function (doc) {
-  if (doc) {
-    await mongoose.model("Activity")
-      .findByIdAndUpdate(doc.activityId, { $inc: { registrationsCount: -1 } })
-      .catch((e) => console.error("registrationsCount dec failed:", e.message));
-    await mongoose.model("Event")
-      .findByIdAndUpdate(doc.eventId, { $inc: { totalRegistrations: -1 } })
-      .catch((e) => console.error("totalRegistrations dec failed:", e.message));
-  }
+  if (!doc) return;
+
+  const [Activity, Event, UserProfile] = [
+    mongoose.model("Activity"),
+    mongoose.model("Event"),
+    mongoose.model("UserProfile"),
+  ];
+
+  await Promise.all([
+    Activity.findByIdAndUpdate(doc.activityId, { $inc: { registrationsCount: -1 } })
+      .catch((e) => console.error("[Participation hook] registrationsCount dec:", e.message)),
+
+    Event.findByIdAndUpdate(doc.eventId, { $inc: { totalRegistrations: -1 } })
+      .catch((e) => console.error("[Participation hook] totalRegistrations dec:", e.message)),
+
+    UserProfile.findOneAndUpdate(
+      { userId: doc.userId, totalParticipations: { $gt: 0 } },
+      { $inc: { totalParticipations: -1 } }
+    ).catch((e) => console.error("[Participation hook] totalParticipations dec:", e.message)),
+  ]);
 });
+
+/* ---------------------------------------------------------------
+   EXPORT
+--------------------------------------------------------------- */
 
 export const EventParticipation = mongoose.model("EventParticipation", EventParticipationSchema);
 export default EventParticipation;
