@@ -76,9 +76,9 @@ export const createStory = async (req, res) => {
  
 export const getStoryByStoryId = async (req, res) => {
   try {
-    const { topicId } = req.params;
-
-    const story = await Story.findOne({ topicId });
+    const { storyId } = req.params;
+console.log("Fetching story with ID:", storyId);
+    const story = await Story.findOne({ _id:storyId });
     if (!story) {
       return res.status(404).json({ message: "Story not found" });
     }

@@ -58,6 +58,7 @@ export const createActivity = asynchandler(async (req, res) => {
 ══════════════════════════════════════════════════════════ */
 export const getActivitiesByEvent = asynchandler(async (req, res) => {
   const { eventId } = req.params;
+  console.log("Fetching activities for eventId:", eventId, "with query:", req.query);
   if (!isValidId(eventId)) throw new ApiError(400, "Invalid eventId");
 
   const { status, category } = req.query;
