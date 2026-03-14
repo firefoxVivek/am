@@ -57,6 +57,8 @@ import serviceRoutes     from "./routes/institution/services.routes.js";
 import bookingRoutes     from "./routes/institution/booking.routes.js";
 
  import cartRoutes from "./routes/institution/cart.routes.js";
+ import requestRoutes from "./routes/request/requestCenter.routes.js";
+app.use("/api/v1/requests", requestRoutes);
 app.use("/api/v1/cart", cartRoutes);
 app.use("/api/v1/institutions",              institutionRoutes);
 app.use("/api/v1/institutions/:institutionId/services", serviceRoutes);

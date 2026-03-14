@@ -46,13 +46,14 @@ export const createServiceCard = asynchandler(async (req, res) => {
   }
 
   const card = await ServiceCard.create({
-    providerId:    req.user._id,
+    providerId:   req.user._id,
     institutionId,
-    title:         title.trim(),
-    about:         about?.trim() ?? "",
-    imageUrl:      imageUrl ?? null,
-    customFields:  customFields ?? {},
-    itemsList:     itemsList ?? [],
+    title:        title.trim(),
+    about:        about?.trim() ?? "",
+    imageUrl:     imageUrl ?? null,
+    customFields: customFields ?? {},
+    itemsList:    itemsList ?? [],
+    availability: req.body.availability ?? { status: "open" },
   });
 
   // Notify all institution subscribers (non-blocking)
@@ -124,7 +125,7 @@ export const updateServiceCard = asynchandler(async (req, res) => {
   const { cardId } = req.params;
   await ensureCardOwner(cardId, req.user._id);
 
-  const ALLOWED = ["title", "about", "imageUrl", "customFields"];
+  const ALLOWED = ["title", "about", "imageUrl", "customFields", "availability"];
   const updates = {};
   for (const key of ALLOWED) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];

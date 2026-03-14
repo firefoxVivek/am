@@ -252,7 +252,7 @@ export const getInstitutionShelves = asynchandler(async (req, res) => {
         as:           "category",
       },
     },
-    { $unwind: { path: "$category", preserveNullAndEmpty: false } },
+    { $unwind: { path: "$category", preserveNullAndEmptyArrays: false } },
     // Group by genre (Level-1 parentId)
     {
       $group: {

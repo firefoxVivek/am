@@ -37,7 +37,7 @@ router.use(verifyJWT);
 
 // GET /api/v1/institutions/shelf?locationId=&limit=6
 // The Kindle-style home screen — all genres with institution preview rows
-router.get("/shelf",   getInstitutionShelves);
+router.get("/profile/shelf",   getInstitutionShelves);
 
 // GET /api/v1/institutions/search?q=&categoryId=&locationId=
 router.get("/search",  searchInstitutions);

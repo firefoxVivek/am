@@ -45,6 +45,26 @@ const serviceCardSchema = new mongoose.Schema(
       amenities: { type: [String], default: [] },
     },
 
+    /*
+     * AVAILABILITY
+     * ─────────────────────────────────────────────────────────────
+     * Controls whether users can currently submit booking requests.
+     *
+     * status values:
+     *   "open"     — always bookable, no date restriction
+     *   "limited"  — bookable until `closesAt` (e.g. admissions deadline)
+     *   "seasonal" — bookable only between `opensAt` and `closesAt`
+     *   "closed"   — not accepting bookings right now
+     *
+     * note: free-text shown to users, e.g. "Registrations close 30 June"
+     */
+    availability: {
+      status:   { type: String, enum: ["open", "limited", "seasonal", "closed"], default: "open" },
+      opensAt:  { type: Date, default: null },   // used by "seasonal"
+      closesAt: { type: Date, default: null },   // used by "limited" + "seasonal"
+      note:     { type: String, trim: true, maxlength: 200, default: "" },
+    },
+
     itemsList: {
       type: [serviceItemSchema],
       default: [],
