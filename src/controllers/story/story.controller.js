@@ -77,7 +77,7 @@ export const createStory = async (req, res) => {
 export const getStoryByStoryId = async (req, res) => {
   try {
     const { storyId } = req.params;
-console.log("Fetching story with ID:", storyId);
+ 
     const story = await Story.findOne({ _id:storyId });
     if (!story) {
       return res.status(404).json({ message: "Story not found" });
@@ -92,31 +92,42 @@ console.log("Fetching story with ID:", storyId);
 export const getStoryByUserId = async (req, res) => {
   try {
     const { userId } = req.params;
-    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const page  = Math.max(parseInt(req.query.page)  || 1,  1);
     const limit = Math.min(parseInt(req.query.limit) || 10, 50);
-    const skip = (page - 1) * limit;
+    const skip  = (page - 1) * limit;
 
     const [stories, total] = await Promise.all([
       Story.find({ userId })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
-        .select("title image createdAt userId")
-        .populate("userId", "username"), // 👈 get username
+        .select("title image createdAt userId clubId")
+        .populate("userId", "username displayName imageUrl")
+        .populate("clubId", "clubName image"),
       Story.countDocuments({ userId }),
     ]);
 
-    if (!stories.length) {
-      return res.status(404).json({ message: "No stories found" });
+    if (!stories.length && page === 1) {
+      return res.status(200).json({
+        data: [],
+        meta: { page, limit, total: 0, totalPages: 0, hasNextPage: false },
+      });
     }
 
     const result = stories.map((story) => ({
-      storyId: story._id,
-      title: story.title,
-      image: story.image || null,
+      storyId:   story._id,
+      title:     story.title,
+      image:     story.image || null,
       createdAt: story.createdAt,
-      userId: story.userId?._id,
-      username: story.userId?.username,
+      clubId:    story.clubId?._id ?? story.clubId,
+      clubName:  story.clubId?.clubName ?? null,
+      clubImage: story.clubId?.image    ?? null,
+      author: {
+        userId:      story.userId?._id,
+        username:    story.userId?.username    ?? "",
+        displayName: story.userId?.displayName ?? "",
+        imageUrl:    story.userId?.imageUrl    ?? null,
+      },
     }));
 
     res.status(200).json({
@@ -125,7 +136,8 @@ export const getStoryByUserId = async (req, res) => {
         page,
         limit,
         total,
-        totalPages: Math.ceil(total / limit),
+        totalPages:  Math.ceil(total / limit),
+        hasNextPage: page < Math.ceil(total / limit),
       },
     });
   } catch (error) {

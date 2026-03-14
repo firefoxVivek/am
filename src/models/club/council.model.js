@@ -1,131 +1,128 @@
 import mongoose from "mongoose";
 
+/*
+ * COUNCIL MODEL
+ * ──────────────────────────────────────────────────────────────────
+ * A Council is the governing body that sits above clubs and below
+ * an institution. One institution can have multiple councils.
+ * One council can govern multiple clubs.
+ *
+ * HIERARCHY:
+ *   Institution → Council → Club
+ *
+ * FIXES from original file:
+ *   - `councilId` was referenced in an index but never defined → added
+ *   - `institution.id` ref was pointing to "User" → fixed to "Institution"
+ *   - Model was never exported → added export
+ *   - Text index used `owner.displayname` (lowercase, wrong field) → fixed
+ */
+
 const CouncilSchema = new mongoose.Schema(
   {
-    /**
-     * 🔐 OWNER (source of truth + snapshot)
-     */
-    owner: {
-      id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-        required: true,
-        index: true,
-      },
-      name: {
-        type: String,
-        required: true,
-        trim: true,
-      },
+    // Human-readable unique slug — used in URLs and FCM topic names
+    // e.g. "nss-iit-bombay"
+    councilId: {
+      type:      String,
+      required:  true,
+      trim:      true,
+      lowercase: true,
+      unique:    true,
+      index:     true,
     },
 
-
-    /**
-     * 🏷️ DISPLAY NAME
-     */
     councilName: {
-      type: String,
-      required: true,
-      trim: true,
+      type:      String,
+      required:  true,
+      trim:      true,
       maxlength: 120,
     },
 
-    /**
-     * 🖼️ PROFILE IMAGE
-     */
     image: {
-      type: String,
-      trim: true,
+      type:    String,
+      trim:    true,
       default: null,
     },
 
-    /**
-     * 📝 ABOUT / DESCRIPTION
-     */
     about: {
-      type: String,
-      trim: true,
+      type:      String,
+      trim:      true,
       maxlength: 1500,
-      default: "",
+      default:   "",
     },
 
-    /**
-     * 🏫 INSTITUTION (snapshot + ref)
-     */
-    institution: {
+    // Owner = the user who created the council (institution admin)
+    owner: {
       id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
+        type:     mongoose.Schema.Types.ObjectId,
+        ref:      "User",
         required: true,
-        index: true,
+        index:    true,
       },
       name: {
-        type: String,
+        type:     String,
         required: true,
-        trim: true,
+        trim:     true,
       },
     },
 
-    /**
-     * 🛡️ PRIVACY
-     */
+    // Parent institution — snapshot + ref
+    institution: {
+      id: {
+        type:     mongoose.Schema.Types.ObjectId,
+        ref:      "Institution",   // was "User" in original — fixed
+        required: true,
+        index:    true,
+      },
+      name: {
+        type:     String,
+        required: true,
+        trim:     true,
+      },
+    },
+
     privacy: {
-      type: String,
-      enum: ["public", "private", "invite_only"],
+      type:    String,
+      enum:    ["public", "private", "invite_only"],
       default: "public",
-      index: true,
+      index:   true,
     },
 
-    /**
-     * ⚙️ STATUS
-     */
     status: {
-      type: String,
-      enum: ["active", "suspended", "deleted"],
+      type:    String,
+      enum:    ["active", "suspended", "deleted"],
       default: "active",
-      index: true,
+      index:   true,
     },
 
-    /**
-     * 📊 COUNTERS (cached)
-     */
+    // Cached counters — maintained by hooks on CouncilClubMembership
     clubsCount: {
-      type: Number,
+      type:    Number,
       default: 0,
-      index: true,
+      min:     0,
     },
 
-    membersCount: {
-      type: Number,
+    // followersCount maintained by Subscription model (topic followers)
+    followersCount: {
+      type:    Number,
       default: 0,
-    },
-
-    /**
-     * 🔧 SYSTEM METADATA
-     */
-    createdBySystem: {
-      type: Boolean,
-      default: false,
+      min:     0,
     },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
-// 🔍 Search & discovery
+
+/* ── Indexes ──────────────────────────────────────────────────────*/
+
+// Full-text search
 CouncilSchema.index({
-  councilName: "text",
-  about: "text",
-  "owner.displayname": "text",
+  councilName:      "text",
+  about:            "text",
+  "owner.name":     "text",      // fixed from owner.displayname
   "institution.name": "text",
 });
 
-// 🔍 Filtering & browsing
 CouncilSchema.index({ "institution.id": 1, privacy: 1 });
 CouncilSchema.index({ status: 1, privacy: 1 });
 
-// 🔐 Case-insensitive uniqueness
-CouncilSchema.index(
-  { councilId: 1 },
-  { unique: true, collation: { locale: "en", strength: 2 } }
-);
+export const Council = mongoose.model("Council", CouncilSchema);
+export default Council;

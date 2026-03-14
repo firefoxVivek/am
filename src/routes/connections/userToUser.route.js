@@ -11,6 +11,7 @@ import {
   getOutgoingRequests,
   getFriendshipStatus,
   getFriendCount,
+  getUserFriends,
 } from "../../controllers/connections/userTouser.controller.js";
 
 const router = express.Router();
@@ -26,6 +27,7 @@ router.delete("/remove/:userId", removeFriend);
 
  
 router.get("/myfriends", getMyFriends);
+router.get("/friends/:userId", getUserFriends);
 router.get("/requests/incoming", getIncomingRequests);
 router.get("/requests/outgoing", getOutgoingRequests);
 

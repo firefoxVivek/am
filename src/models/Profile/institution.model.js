@@ -3,85 +3,93 @@ import mongoose from "mongoose";
 const InstitutionSchema = new mongoose.Schema(
   {
     name: {
-      type: String,
+      type:     String,
       required: true,
-      trim: true,
-      index: true,
+      trim:     true,
+      index:    true,
     },
 
-    // Reference to a Category model (e.g., School, Mall, Barber)
+    // Level-2 category (e.g. School, Hospital, Gym)
+    // Level-1 parent is the genre (Education, Health, Sports)
     categoryId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Category",
+      type:     mongoose.Schema.Types.ObjectId,
+      ref:      "Category",
       required: true,
-      index: true,
+      index:    true,
     },
-subscribersCount: {
-  type: Number,
-  default: 0,
-  index: true,
-},
 
+    subscribersCount: {
+      type:    Number,
+      default: 0,
+      min:     0,
+      index:   true,
+    },
+
+    // Councils this institution is associated with (snapshot array)
     councilName: [
       {
         councilId: { type: String, trim: true },
-        name: { type: String, trim: true },
-        _id: false
+        name:      { type: String, trim: true },
+        _id:       false,
       },
     ],
 
-    // Physical specifics (Landmark, Street, etc.)
+    // Physical address string (landmark, street etc.)
     address: {
-      type: String, 
+      type:     String,
       required: true,
-      trim: true,
+      trim:     true,
     },
 
-    // The Geographic Anchor (from your 155k docs)
+    // City anchor — refs the 155k Location collection
     locationId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Location", 
+      type:     mongoose.Schema.Types.ObjectId,
+      ref:      "Location",
       required: true,
-      index: true, 
+      index:    true,
     },
 
-    about: { type: String, maxlength: 2000 },
-    themes: [{ type: String }],
-   
+    about:  { type: String, maxlength: 2000, default: "" },
+    themes: [{ type: String, trim: true }],
 
     founderId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      type:     mongoose.Schema.Types.ObjectId,
+      ref:      "User",
       required: true,
-      index: true,
+      index:    true,
     },
 
-    logo: String,
-    website: String,
-    contactEmail: String,
-    phone: String,
-    instagram: String,
-    linkedIn: String,
+    logo:         { type: String, default: null },
+    website:      { type: String, default: null },
+    contactEmail: { type: String, default: null },
+    phone:        { type: String, default: null },
+    instagram:    { type: String, default: null },
+    linkedIn:     { type: String, default: null },
 
     status: {
-      type: String,
-      enum: ["draft", "active", "suspended"],
+      type:    String,
+      enum:    ["draft", "active", "suspended"],
       default: "draft",
-      index: true,
+      index:   true,
     },
   },
   { timestamps: true }
 );
 
-/* -----------------------------------------------------------
-   INDEXING STRATEGY
------------------------------------------------------------ */
+/* ── Indexes ──────────────────────────────────────────────────────*/
 
-// 1. For "Generic" area searches: find all shops in 'Asifabad'
-InstitutionSchema.index({ locationId: 1 });
+// Full-text search — powers GET /institutions/search?q=
+// Without this index the $text query throws a MongoError at runtime.
+InstitutionSchema.index({ name: "text", about: "text" });
 
-// 2. For "Targeted" searches: find all 'Barbers' in 'Asifabad'
-// This is your Compound Index for high-speed filtering
-InstitutionSchema.index({ categoryId: 1, locationId: 1 });
+// Shelf query: all active institutions in a city (one scan, grouped in app)
+InstitutionSchema.index({ locationId: 1, status: 1 });
+
+// Discover / filter: all institutions of a type in a city
+InstitutionSchema.index({ categoryId: 1, locationId: 1, status: 1 });
+
+// Subscriber ranking within a city
+InstitutionSchema.index({ locationId: 1, subscribersCount: -1 });
 
 export const Institution = mongoose.model("Institution", InstitutionSchema);
+export default Institution;

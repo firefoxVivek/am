@@ -383,3 +383,23 @@ export const getFriendCount = async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, { count }, "Friend count fetched"));
 };
+
+/* =========================
+   GET FRIENDS OF ANY USER
+   GET /api/v1/connections/friends/:userId
+   Returns the accepted friends of any user (public).
+========================== */
+export const getUserFriends = async (req, res) => {
+  const { userId } = req.params;
+
+  const friends = await Friendship.find({
+    status: "accepted",
+    $or: [{ requester: userId }, { recipient: userId }],
+  })
+    .populate("requester", "username displayName imageUrl")
+    .populate("recipient", "username displayName imageUrl");
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, friends, "Friends fetched successfully"));
+};

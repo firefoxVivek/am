@@ -1,5 +1,3 @@
-
- 
 import { ClubPost } from "../../models/club/posts.model.js";
 import { asynchandler } from "../../utils/asynchandler.js";
 import { ApiError } from "../../utils/ApiError.js";
@@ -316,3 +314,34 @@ export const getClubPostsByDate = asynchandler(async (req, res) => {
   );
 });
 
+/* =========================
+   GET POSTS BY USER
+   GET /api/v1/club/posts/user/:userId
+   Returns all published, non-deleted posts authored by a given user,
+   with the club name populated for display on their profile.
+========================== */
+export const getPostsByUser = asynchandler(async (req, res) => {
+  const { userId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new ApiError(400, "Invalid user ID");
+  }
+
+  const posts = await ClubPost.find({
+    createdBy: userId,
+    isDeleted:  false,
+    publishAt:  { $lte: new Date() },
+    $or: [
+      { expireAt: null },
+      { expireAt: { $gt: new Date() } },
+    ],
+  })
+    .sort({ publishAt: -1 })
+    .populate("clubId", "clubName clubId image")
+    .populate("createdBy", "displayName imageUrl")
+    .lean();
+
+  return res.status(200).json(
+    new ApiResponse(200, posts, "User posts fetched")
+  );
+});

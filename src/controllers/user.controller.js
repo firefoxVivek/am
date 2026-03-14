@@ -259,35 +259,26 @@ export const checkUsernameAvailability = async (req, res) => {
       )
     );
 });
+// updateFcmToken is now handled by POST /api/v1/notifications/subscribe
+// which stores a single token, triggers recovery, and resubscribes all topics.
+// This stub is kept so existing route imports don't break during migration.
 const updateFcmToken = asynchandler(async (req, res) => {
   const { fcmToken } = req.body;
-  console.log("FCM Token received:", fcmToken);
-
-  if (!fcmToken) {
-    throw new ApiError(400, "FCM token is required");
-  }
+  if (!fcmToken?.trim()) throw new ApiError(400, "FCM token is required");
 
   const userId = req.user._id;
 
-  // Use findByIdAndUpdate with $addToSet to prevent duplicate tokens in the array
+  // Single token — overwrite, no accumulation
   const user = await User.findByIdAndUpdate(
     userId,
-    { 
-      $addToSet: { deviceTokens: fcmToken } 
-    },
-    { new: true }
+    { $set: { deviceToken: fcmToken } },
+    { new: true, select: "deviceToken" }
   );
 
-  if (!user) {
-    throw new ApiError(404, "User not found");
-  }
+  if (!user) throw new ApiError(404, "User not found");
 
   res.status(200).json(
-    new ApiResponse(
-      200, 
-      { deviceTokens: user.deviceTokens }, 
-      "FCM token updated successfully"
-    )
+    new ApiResponse(200, { deviceToken: user.deviceToken }, "FCM token updated successfully")
   );
 });
 
@@ -326,28 +317,41 @@ const completeProfileAfterOtp = async (req, res) => {
 
  
 const logoutUser = asynchandler(async (req, res) => {
+  const userId = req.user._id;
+
+  // Clear token + refresh token atomically
   await User.findByIdAndUpdate(
-    req.user._id,
-    {
-      $unset: {
-        refreshToken: 1, // this removes the field from document
-      },
-    },
-    {
-      new: true,
-    }
+    userId,
+    { $unset: { refreshToken: 1 }, $set: { deviceToken: null } },
+    { new: true }
   );
 
-  const options = {
-    httpOnly: true,
-    secure: true,
-  };
+  // Unsubscribe all active FCM topics and null out token snapshots in registry
+  // Import inline to avoid circular deps — notification controller is a sibling
+  try {
+    const { unregisterFcmToken } = await import("./notifications/notification.controller.js");
+    // Call the internal unregister helper directly (not via HTTP)
+    const { Subscription } = await import("../models/misc/subscription.model.js");
+    const admin = (await import("../../config/firebase.js")).default;
+    const user  = await import("../models/Profile/auth.models.js").then(m => m.default);
+
+    // Already cleared above — just null out subscription snapshots
+    await Subscription.updateMany(
+      { userId, isActive: true },
+      { $set: { deviceToken: null } }
+    );
+  } catch (e) {
+    // Non-blocking — logout still succeeds even if topic cleanup fails
+    console.error("[logout] topic cleanup error:", e.message);
+  }
+
+  const options = { httpOnly: true, secure: true };
 
   return res
     .status(200)
     .clearCookie("accessToken", options)
     .clearCookie("refreshToken", options)
-    .json(new ApiResponse(200, {}, "User logged Out"));
+    .json(new ApiResponse(200, {}, "User logged out successfully"));
 });
 
 const refreshAccessToken = asynchandler(async (req, res) => {

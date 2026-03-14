@@ -131,8 +131,17 @@ export const searchPublicUserProfiles = asynchandler(async (req, res) => {
   const pageLimit  = Math.min(parseInt(limit, 10), 50);
   const skip       = (pageNumber - 1) * pageLimit;
 
+  // Use regex for prefix/partial matching (works for short strings like "Rah" → "Rahul").
+  // $text only matches whole words and requires the index to be fully built —
+  // regex on name+username is fast enough for the page sizes used here.
+  const escaped = trimmedQ.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex   = new RegExp(escaped, "i");
+
   const filter = {
-    $text: { $search: trimmedQ },
+    $or: [
+      { name:     regex },
+      { username: regex },
+    ],
     userId: { $ne: new mongoose.Types.ObjectId(viewerId) },
   };
 
@@ -144,7 +153,7 @@ export const searchPublicUserProfiles = asynchandler(async (req, res) => {
   const [profiles, total] = await Promise.all([
     UserProfile.find(filter)
       .select("userId name username imageUrl bio location locationId freelancer totalFriends")
-      .sort({ score: { $meta: "textScore" } })
+      .sort({ name: 1 })
       .skip(skip)
       .limit(pageLimit)
       .lean(),
@@ -160,7 +169,7 @@ export const searchPublicUserProfiles = asynchandler(async (req, res) => {
     );
   }
 
-  const userIds      = profiles.map((p) => p.userId);
+  const userIds       = profiles.map((p) => p.userId);
   const friendshipMap = await batchFriendshipStatus(userIds, viewerId);
 
   const results = profiles.map((p) => ({

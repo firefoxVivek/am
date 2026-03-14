@@ -1,33 +1,82 @@
 import express from "express";
+import { verifyJWT } from "../../middleware/auth.middleware.js";
 import {
   createInstitution,
   getMyInstitution,
   getPublicInstitution,
-  getInstitutionsByFilter,
   updateInstitution,
+  getInstitutionsByFilter,
+  getInstitutionShelves,
+  searchInstitutions,
   subscribeToInstitution,
   unsubscribeFromInstitution,
+  getInstitutionClubs,
+  getInstitutionCouncils,
 } from "../../controllers/institution/profile.controller.js";
-import { verifyJWT } from "../../middleware/auth.middleware.js";
+import {
+  createInstitutionPost,
+  getInstitutionFeed,
+  getInstitutionPost,
+  updateInstitutionPost,
+  deleteInstitutionPost,
+} from "../../controllers/institution/institutionPost.controller.js";
+
+/*
+ * Wire in app.js:
+ *   import institutionRoutes from "./routes/institution/profile.routes.js";
+ *   app.use("/api/v1/institutions", institutionRoutes);
+ *
+ * ORDERING: fixed paths (/shelf, /search, /discover, /me)
+ * MUST come before /:institutionId GET routes.
+ */
 
 const router = express.Router();
+router.use(verifyJWT);
 
-// ── Public (but still requires login for isSubscribed / isOwner context) ──
+/* ── Fixed paths ─────────────────────────────────────────────────*/
 
-// GET /api/v1/institution/profile/discover?categoryId=&locationId=&page=&limit=
-router.get("/discover", verifyJWT, getInstitutionsByFilter);
+// GET /api/v1/institutions/shelf?locationId=&limit=6
+// The Kindle-style home screen — all genres with institution preview rows
+router.get("/shelf",   getInstitutionShelves);
 
-// GET /api/v1/institution/profile/:institutionId  — public profile view
-router.get("/:institutionId", verifyJWT, getPublicInstitution);
+// GET /api/v1/institutions/search?q=&categoryId=&locationId=
+router.get("/search",  searchInstitutions);
 
-// ── Authenticated owner routes ────────────────────────────────
+// GET /api/v1/institutions/discover?categoryId=&locationId=&page=&limit=
+router.get("/discover", getInstitutionsByFilter);
 
-router.post("/create",    verifyJWT, createInstitution);
-router.get("/me",         verifyJWT, getMyInstitution);
-router.patch("/update",   verifyJWT, updateInstitution);
+// GET  /api/v1/institutions/me
+// POST /api/v1/institutions
+router.get( "/me", getMyInstitution);
+router.post("/",   createInstitution);
 
-// Subscribe / unsubscribe
-router.post("/subscribe/:institutionId",   verifyJWT, subscribeToInstitution);
-router.post("/unsubscribe/:institutionId", verifyJWT, unsubscribeFromInstitution);
+/* ── Param routes /:institutionId ────────────────────────────────*/
+
+// GET   /api/v1/institutions/:institutionId
+// PATCH /api/v1/institutions/:institutionId
+router.get(  "/:institutionId", getPublicInstitution);
+router.patch("/:institutionId", updateInstitution);
+
+// POST   /api/v1/institutions/:institutionId/subscribe  → follow
+// DELETE /api/v1/institutions/:institutionId/subscribe  → unfollow
+router.post(  "/:institutionId/subscribe", subscribeToInstitution);
+router.delete("/:institutionId/subscribe", unsubscribeFromInstitution);
+
+// GET /api/v1/institutions/:institutionId/clubs
+// GET /api/v1/institutions/:institutionId/councils
+router.get("/:institutionId/clubs",    getInstitutionClubs);
+router.get("/:institutionId/councils", getInstitutionCouncils);
+
+// GET  /api/v1/institutions/:institutionId/posts
+// POST /api/v1/institutions/:institutionId/posts
+router.get( "/:institutionId/posts", getInstitutionFeed);
+router.post("/:institutionId/posts", createInstitutionPost);
+
+// GET    /api/v1/institutions/:institutionId/posts/:postId
+// PATCH  /api/v1/institutions/:institutionId/posts/:postId
+// DELETE /api/v1/institutions/:institutionId/posts/:postId
+router.get(   "/:institutionId/posts/:postId", getInstitutionPost);
+router.patch( "/:institutionId/posts/:postId", updateInstitutionPost);
+router.delete("/:institutionId/posts/:postId", deleteInstitutionPost);
 
 export default router;
