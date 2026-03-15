@@ -98,7 +98,7 @@ export const getMyCouncils = asynchandler(async (req, res) => {
 ================================================================ */
 export const getCouncilById = asynchandler(async (req, res) => {
   const { councilId } = req.params;
-console.log("Fetching council with ID/slug:", councilId);
+ 
   // Accept either MongoDB _id or the human-readable councilId slug
   const isObjectId = mongoose.Types.ObjectId.isValid(councilId);
   const filter = isObjectId

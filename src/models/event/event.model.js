@@ -31,13 +31,25 @@ const EventSchema = new Schema(
       required: true,
       index: true,
     },
-    location: {
-      venue:   { type: String, trim: true, default: null },
-      city:    { type: String, trim: true, default: null },
-      state:   { type: String, trim: true, default: null },
-      country: { type: String, trim: true, default: "India" },
-      mapLink: { type: String, trim: true, default: null },
+
+    // ── Location ──────────────────────────────────────────────────────────────
+    // locationId is the queryable anchor — used for district-scoped discovery.
+    // The location{} sub-doc is a display snapshot so reads need no join.
+    locationId: {
+      type: Schema.Types.ObjectId,
+      ref: "Location",
+      default: null,
+      index: true,
     },
+    location: {
+      venue:        { type: String, trim: true, default: null },
+      city:         { type: String, trim: true, default: null },
+      districtName: { type: String, trim: true, default: null },
+      state:        { type: String, trim: true, default: null },
+      country:      { type: String, trim: true, default: "India" },
+      mapLink:      { type: String, trim: true, default: null },
+    },
+
     startDate: {
       type: Date,
       required: true,
@@ -46,6 +58,8 @@ const EventSchema = new Schema(
       type: Date,
       required: true,
     },
+
+    // ── Ownership ─────────────────────────────────────────────────────────────
     clubId: {
       type: Schema.Types.ObjectId,
       ref: "Club",
@@ -62,7 +76,17 @@ const EventSchema = new Schema(
       ref: "Council",
       default: null,
     },
-    // Denormalized — maintained by Activity and Participation hooks
+
+    // ── Visibility ────────────────────────────────────────────────────────────
+    // true  → visible to everyone in discover / public feeds
+    // false → visible only to club members
+    isPublic: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+
+    // ── Denormalized counters (maintained by Activity/Participation hooks) ────
     totalActivities: {
       type: Number,
       default: 0,
@@ -73,6 +97,7 @@ const EventSchema = new Schema(
       default: 0,
       min: 0,
     },
+
     status: {
       type: String,
       enum: ["draft", "published", "completed", "cancelled"],
@@ -83,12 +108,17 @@ const EventSchema = new Schema(
   { timestamps: true }
 );
 
-// Compound indexes
+// ── Indexes ───────────────────────────────────────────────────────────────────
 EventSchema.index({ name: "text", description: "text" });
 EventSchema.index({ startDate: 1, endDate: 1 });
 EventSchema.index({ clubId: 1, startDate: 1 });
 EventSchema.index({ clubId: 1, status: 1 });
 EventSchema.index({ genre: 1, status: 1, startDate: 1 });
+
+// Discover-specific compound indexes
+EventSchema.index({ locationId: 1, startDate: 1, isPublic: 1, status: 1 });
+EventSchema.index({ startDate: 1, endDate: 1, isPublic: 1, status: 1 });
+EventSchema.index({ clubId: 1, startDate: 1, status: 1 });
 
 export const Event = mongoose.model("Event", EventSchema);
 export default Event;

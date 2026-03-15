@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { Institution }  from "../../models/Profile/institution.model.js";
 import { Club }         from "../../models/club/club.model.js";
 import { Council }      from "../../models/club/council.model.js";
+import ServiceCard      from "../../models/institution/serviceCard.model.js";
 import { Subscription } from "../../models/misc/subscription.model.js";
 import { ApiError }     from "../../utils/ApiError.js";
 import { ApiResponse }  from "../../utils/ApiResponse.js";
@@ -91,7 +92,7 @@ export const getPublicInstitution = asynchandler(async (req, res) => {
     throw new ApiError(400, "Invalid institution ID");
   }
 
-  const [institution, sub] = await Promise.all([
+  const [institution, sub, serviceCount, councilCount] = await Promise.all([
     Institution.findOne({ _id: institutionId, status: "active" })
       .populate("locationId", "officeName pincode districtName stateName")
       .populate("categoryId", "name slug icon parentId")
@@ -101,6 +102,8 @@ export const getPublicInstitution = asynchandler(async (req, res) => {
       entityId: institutionId,
       isActive: true,
     }).lean(),
+    ServiceCard.countDocuments({ institutionId, isActive: true }),
+    Council.countDocuments({ "institution.id": institutionId, status: "active" }),
   ]);
 
   if (!institution) throw new ApiError(404, "Institution not found");
@@ -110,6 +113,8 @@ export const getPublicInstitution = asynchandler(async (req, res) => {
       ...institution,
       isOwner:      institution.founderId.toString() === viewerId.toString(),
       isSubscribed: !!sub,
+      serviceCount,
+      councilCount,
     }, "Institution fetched")
   );
 });
@@ -252,7 +257,7 @@ export const getInstitutionShelves = asynchandler(async (req, res) => {
         as:           "category",
       },
     },
-    { $unwind: { path: "$category", preserveNullAndEmptyArrays: false } },
+    { $unwind: { path: "$category", preserveNullAndEmpty: false } },
     // Group by genre (Level-1 parentId)
     {
       $group: {

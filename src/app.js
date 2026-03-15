@@ -60,6 +60,8 @@ import bookingRoutes     from "./routes/institution/booking.routes.js";
  import requestRoutes from "./routes/request/requestCenter.routes.js";
  import sponsorshipRouter from "./routes/sponsorship/sponsorship.routes.js";
  import feedRouter from "./routes/feed.routes.js";
+ import eventDiscoverRouter from "./routes/events/eventDiscovery.routes.js";
+app.use("/api/v1/events/discover", eventDiscoverRouter);
 app.use("/api/v1/feed", feedRouter);
 app.use("/api/v1/sponsorships", sponsorshipRouter);
 app.use("/api/v1/requests", requestRoutes);

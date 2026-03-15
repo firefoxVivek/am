@@ -2,22 +2,28 @@ import mongoose from "mongoose";
 import { Event }              from "../../models/event/event.model.js";
 import { Activity }           from "../../models/event/Activity/masterday.model.js";
 import { EventParticipation } from "../../models/event/participation.model.js";
-import admin                  from "../../../config/firebase.js";
 import { ApiError }           from "../../utils/ApiError.js";
 import { ApiResponse }        from "../../utils/ApiResponse.js";
 import { asynchandler }       from "../../utils/asynchandler.js";
+import { notifyTopic }        from "../../utils/notify.js";   // ← never call admin.messaging() directly
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
 /* ══════════════════════════════════════════════════════════
    CREATE EVENT
    POST /api/v1/events/create
-   Auth: required
-   Body: name, banner, description, type, genre, location{}, startDate, endDate, clubId
+   Body: name, banner, description, type, genre, location{},
+         locationId, startDate, endDate, clubId, isPublic
          [institutionId, councilId]
 ══════════════════════════════════════════════════════════ */
 export const createEvent = asynchandler(async (req, res) => {
-  const { name, banner, description, type, genre, location, startDate, endDate, clubId, institutionId, councilId } = req.body;
+  const {
+    name, banner, description, type, genre,
+    location, locationId,
+    startDate, endDate,
+    clubId, institutionId, councilId,
+    isPublic,
+  } = req.body;
 
   if (!name || !banner || !description || !type || !genre || !startDate || !endDate || !clubId) {
     throw new ApiError(400, "name, banner, description, type, genre, startDate, endDate, clubId are required");
@@ -30,17 +36,21 @@ export const createEvent = asynchandler(async (req, res) => {
   const event = await Event.create({
     name, banner, description, type, genre,
     location: location || {},
-    startDate, endDate, clubId,
+    locationId: locationId || null,
+    startDate, endDate,
+    clubId,
+    isPublic: isPublic ?? true,
     ...(institutionId && { institutionId }),
-    ...(councilId && { councilId }),
+    ...(councilId     && { councilId }),
   });
 
-  // FCM — notify club topic (non-blocking)
-  admin.messaging().send({
-    topic: `club_${clubId}`,
-    notification: { title: "New Event Announced!", body: `${name} is coming. Stay tuned.` },
-    data: { eventId: event._id.toString(), type: "EVENT_CREATED" },
-  }).catch((e) => console.error("FCM createEvent:", e.message));
+  // Notify club members via topic
+  notifyTopic(
+    `club_${clubId}`,
+    "New Event Announced! 📣",
+    `${name} is coming. Stay tuned.`,
+    { eventId: event._id.toString(), type: "EVENT_CREATED" }
+  );
 
   return res.status(201).json(new ApiResponse(201, event, "Event created successfully"));
 });
@@ -48,7 +58,7 @@ export const createEvent = asynchandler(async (req, res) => {
 /* ══════════════════════════════════════════════════════════
    GET EVENTS BY CLUB
    GET /api/v1/events/club/:clubId
-   Query: status, genre, type, upcoming (true/false)
+   Query: status, genre, type, upcoming
 ══════════════════════════════════════════════════════════ */
 export const getEventsByClub = asynchandler(async (req, res) => {
   const { clubId } = req.params;
@@ -57,9 +67,9 @@ export const getEventsByClub = asynchandler(async (req, res) => {
   const { status, genre, type, upcoming } = req.query;
   const filter = { clubId };
 
-  if (status)          filter.status = status;
-  if (genre)           filter.genre  = genre;
-  if (type)            filter.type   = type;
+  if (status)           filter.status    = status;
+  if (genre)            filter.genre     = genre;
+  if (type)             filter.type      = type;
   if (upcoming === "true") filter.startDate = { $gte: new Date() };
 
   const events = await Event.find(filter).sort({ startDate: 1 }).lean();
@@ -82,7 +92,7 @@ export const getUpcomingClubEvents = asynchandler(async (req, res) => {
     status: "published",
     startDate: { $gte: now, $lte: in30 },
   })
-    .select("name banner type genre location startDate endDate totalActivities totalRegistrations status")
+    .select("name banner type genre location locationId startDate endDate totalActivities totalRegistrations status isPublic")
     .sort({ startDate: 1 })
     .lean();
 
@@ -91,7 +101,7 @@ export const getUpcomingClubEvents = asynchandler(async (req, res) => {
 
 /* ══════════════════════════════════════════════════════════
    SEARCH EVENTS
-   GET /api/v1/events/search?q=hackathon&genre=technical&status=published&type=fest
+   GET /api/v1/events/search?q=hackathon&genre=technical&status=published
 ══════════════════════════════════════════════════════════ */
 export const searchEvents = asynchandler(async (req, res) => {
   const { q, genre, type, status } = req.query;
@@ -123,7 +133,6 @@ export const getEventById = asynchandler(async (req, res) => {
   const event = await Event.findById(eventId).lean();
   if (!event) throw new ApiError(404, "Event not found");
 
-  // Attach activity summaries (sorted by day)
   const activities = await Activity.find({ eventId })
     .select("activityName category dayNumber date participationFee registrationDeadline maxParticipants registrationsCount teamAllowed teamSize status venueLogistics.venueName")
     .sort({ dayNumber: 1, date: 1 })
@@ -133,15 +142,15 @@ export const getEventById = asynchandler(async (req, res) => {
 });
 
 /* ══════════════════════════════════════════════════════════
-   UPDATE EVENT  (partial — excludes status, use /publish)
+   UPDATE EVENT
    PATCH /api/v1/events/:eventId
-   Auth: required
+   Allowed: all fields except status, totalActivities, totalRegistrations
+   Use /publish to change status
 ══════════════════════════════════════════════════════════ */
 export const updateEvent = asynchandler(async (req, res) => {
   const { eventId } = req.params;
   if (!isValidId(eventId)) throw new ApiError(400, "Invalid eventId");
 
-  // Strip system-managed and status fields
   const { status, totalActivities, totalRegistrations, ...updates } = req.body;
 
   if (updates.startDate && updates.endDate) {
@@ -149,6 +158,10 @@ export const updateEvent = asynchandler(async (req, res) => {
       throw new ApiError(400, "startDate cannot be after endDate");
     }
   }
+
+  // Sync districtName snapshot into location if locationId is being updated
+  // (full sync should happen via a location lookup service — here we just accept
+  //  the caller passing location.districtName alongside locationId)
 
   const updated = await Event.findByIdAndUpdate(
     eventId,
@@ -163,8 +176,7 @@ export const updateEvent = asynchandler(async (req, res) => {
 /* ══════════════════════════════════════════════════════════
    PUBLISH EVENT
    PATCH /api/v1/events/:eventId/publish
-   Auth: required
-   Rule: event must have at least one activity before it can be published
+   Rule: must have at least one activity
 ══════════════════════════════════════════════════════════ */
 export const publishEvent = asynchandler(async (req, res) => {
   const { eventId } = req.params;
@@ -184,20 +196,19 @@ export const publishEvent = asynchandler(async (req, res) => {
   event.status = "published";
   await event.save();
 
-  // FCM — notify club (non-blocking)
-  admin.messaging().send({
-    topic: `club_${event.clubId}`,
-    notification: { title: "Event is Live! 🎉", body: `${event.name} is now open for registrations` },
-    data: { eventId: event._id.toString(), type: "EVENT_PUBLISHED" },
-  }).catch((e) => console.error("FCM publishEvent:", e.message));
+  notifyTopic(
+    `club_${event.clubId}`,
+    "Event is Live! 🎉",
+    `${event.name} is now open for registrations`,
+    { eventId: event._id.toString(), type: "EVENT_PUBLISHED" }
+  );
 
   return res.status(200).json(new ApiResponse(200, event, "Event published successfully"));
 });
 
 /* ══════════════════════════════════════════════════════════
-   DELETE EVENT  (cascade: activities + participations in transaction)
+   DELETE EVENT  (cascade in transaction)
    DELETE /api/v1/events/:eventId
-   Auth: required
 ══════════════════════════════════════════════════════════ */
 export const deleteEvent = asynchandler(async (req, res) => {
   const { eventId } = req.params;
