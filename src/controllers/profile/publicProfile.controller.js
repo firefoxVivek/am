@@ -4,6 +4,7 @@ import { ApiError }    from "../../utils/ApiError.js";
 import { asynchandler } from "../../utils/asynchandler.js";
 import { Friendship }  from "../../models/connections/usersToUser.model.js";
 import UserProfile     from "../../models/Profile/profile.model.js";
+import User from "../../models/Profile/auth.models.js";
 
 /* ---------------------------------------------------------------
    HELPER — normalised friendship status object
@@ -131,36 +132,30 @@ export const searchPublicUserProfiles = asynchandler(async (req, res) => {
   const pageLimit  = Math.min(parseInt(limit, 10), 50);
   const skip       = (pageNumber - 1) * pageLimit;
 
-  // Use regex for prefix/partial matching (works for short strings like "Rah" → "Rahul").
-  // $text only matches whole words and requires the index to be fully built —
-  // regex on name+username is fast enough for the page sizes used here.
   const escaped = trimmedQ.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex   = new RegExp(escaped, "i");
+  const regex   = new RegExp(`^${escaped}`, "i");
 
+  // Search on User (auth) model — username and displayName live here
   const filter = {
     $or: [
-      { name:     regex },
-      { username: regex },
+      { username:    regex },
+      { displayName: regex },
     ],
-    userId: { $ne: new mongoose.Types.ObjectId(viewerId) },
+    _id: { $ne: new mongoose.Types.ObjectId(viewerId) },
+    status: "registered",
   };
 
-  if (freelancerOnly === "true") filter["freelancer.isFreelancer"] = true;
-  if (locationId && mongoose.Types.ObjectId.isValid(locationId)) {
-    filter.locationId = new mongoose.Types.ObjectId(locationId);
-  }
-
-  const [profiles, total] = await Promise.all([
-    UserProfile.find(filter)
-      .select("userId name username imageUrl bio location locationId freelancer totalFriends")
-      .sort({ name: 1 })
+  const [users, total] = await Promise.all([
+    User.find(filter)
+      .select("_id username displayName imageUrl")
+      .sort({ username: 1 })
       .skip(skip)
       .limit(pageLimit)
       .lean(),
-    UserProfile.countDocuments(filter),
+    User.countDocuments(filter),
   ]);
 
-  if (!profiles.length) {
+  if (!users.length) {
     return res.status(200).json(
       new ApiResponse(200, {
         results: [],
@@ -169,22 +164,40 @@ export const searchPublicUserProfiles = asynchandler(async (req, res) => {
     );
   }
 
-  const userIds       = profiles.map((p) => p.userId);
+  // Fetch UserProfiles in one shot for extra fields (bio, location, freelancer)
+  const userIds    = users.map((u) => u._id);
+  const profiles   = await User.find({ userId: { $in: userIds } })
+    .select("userId bio location locationId freelancer totalFriends")
+    .lean();
+
+  const profileMap = new Map(profiles.map((p) => [p.userId.toString(), p]));
+
+  // Optional filters that live on UserProfile
   const friendshipMap = await batchFriendshipStatus(userIds, viewerId);
 
-  const results = profiles.map((p) => ({
-    userId:       p.userId,
-    name:         p.name,
-    username:     p.username,
-    imageUrl:     p.imageUrl,
-    bio:          p.bio,
-    city:         p.location?.districtName ?? null,
-    totalFriends: p.totalFriends ?? 0,
-    freelancer:   p.freelancer?.isFreelancer
-      ? { isFreelancer: true, availability: p.freelancer.availability, skills: p.freelancer.skills, tagline: p.freelancer.tagline }
-      : null,
-    friendship:   buildFriendshipStatus(friendshipMap.get(p.userId.toString()) ?? null, viewerId),
-  }));
+  const results = users
+    .map((u) => {
+      const profile = profileMap.get(u._id.toString()) ?? {};
+
+      // Apply optional UserProfile-level filters here
+      if (freelancerOnly === "true" && !profile.freelancer?.isFreelancer) return null;
+      if (locationId && profile.locationId?.toString() !== locationId) return null;
+
+      return {
+        userId:       u._id,
+        username:     u.username,
+        name:         u.displayName,
+        imageUrl:     u.imageUrl,
+        bio:          profile.bio ?? null,
+        city:         profile.location?.districtName ?? null,
+        totalFriends: profile.totalFriends ?? 0,
+        freelancer: profile.freelancer?.isFreelancer
+          ? { isFreelancer: true, availability: profile.freelancer.availability, skills: profile.freelancer.skills, tagline: profile.freelancer.tagline }
+          : null,
+        friendship: buildFriendshipStatus(friendshipMap.get(u._id.toString()) ?? null, viewerId),
+      };
+    })
+    .filter(Boolean);
 
   return res.status(200).json(
     new ApiResponse(200, {
@@ -194,7 +207,7 @@ export const searchPublicUserProfiles = asynchandler(async (req, res) => {
         page:        pageNumber,
         limit:       pageLimit,
         totalPages:  Math.ceil(total / pageLimit),
-        hasNextPage: skip + profiles.length < total,
+        hasNextPage: skip + users.length < total,
       },
     }, "Search results fetched successfully")
   );
