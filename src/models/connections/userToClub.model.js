@@ -61,12 +61,29 @@ const clubMembershipSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
+    /* ---------------------------------------------------------------
+       MEMBERSHIP FEE + PAYMENT
+       membershipFee: amount in ₹ set by club (0 = free club).
+       paymentStatus: unpaid → paid after Razorpay payment confirmed.
+       Payment controller reads both fields — they must exist on the model.
+    --------------------------------------------------------------- */
+    membershipFee: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    paymentStatus: {
+      type: String,
+      enum: ["unpaid", "paid"],
+      default: "unpaid",
+    },
   },
   { timestamps: true }
 );
 
 clubMembershipSchema.index({ clubId: 1, userId: 1 }, { unique: true });
-
 clubMembershipSchema.index({ userId: 1, status: 1, role: 1 });
 clubMembershipSchema.index({ clubId: 1, role: 1 });
 clubMembershipSchema.index({ userId: 1, status: 1 });

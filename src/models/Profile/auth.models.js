@@ -68,20 +68,40 @@ const userSchema = new Schema(
 
     /* ---------------------------------------------------------------
        SINGLE DEVICE TOKEN
-       We store exactly one FCM token per user — the most recent one.
-       
-       Why single instead of array:
-       - Apps run on one device at a time for most users
-       - Stale tokens accumulate silently in arrays and cause FCM errors
-       - Recovery is simpler: one token to resubscribe, no deduplication
-       - When the user logs in on a new device, the old token is overwritten
-         and the Subscription registry is updated with the new token
-       
-       If multi-device is needed in future, change this to [String] and
-       update the recovery logic in notification.controller.js to loop.
+       One FCM token per user — the most recent device only.
+       When user logs in on a new device the old token is overwritten
+       and the Subscription registry is updated with the new token.
     --------------------------------------------------------------- */
     deviceToken: {
       type: String,
+      default: null,
+    },
+
+    /* ---------------------------------------------------------------
+       FOLLOWED INSTITUTIONS
+       Array of institution ObjectIds the user follows.
+       Used by feed controller for institution post discovery.
+       Also used by subscribeToInstitution / unsubscribeFromInstitution.
+    --------------------------------------------------------------- */
+    followedInstitutions: {
+      type: [{ type: Schema.Types.ObjectId, ref: "Institution" }],
+      default: [],
+    },
+
+    /* ---------------------------------------------------------------
+       PREMIUM
+       isPremium: true once a premium payment is confirmed.
+       premiumExpiry: null = lifetime plan, Date = monthly/yearly expiry.
+       Always check: isPremium && (premiumExpiry === null || premiumExpiry > Date.now())
+    --------------------------------------------------------------- */
+    isPremium: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    premiumExpiry: {
+      type: Date,
       default: null,
     },
   },

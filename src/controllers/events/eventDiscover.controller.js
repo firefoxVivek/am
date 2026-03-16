@@ -1,18 +1,15 @@
 import mongoose from "mongoose";
-import { asynchandler }     from "../../utils/asynchandler.js";
-import { ApiResponse }      from "../../utils/ApiResponse.js";
+import { asynchandler }    from "../../utils/asynchandler.js";
+import { ApiResponse }     from "../../utils/ApiResponse.js";
 import { Event }           from "../../models/event/event.model.js";
 import { ClubMembership }  from "../../models/connections/userToClub.model.js";
 import { UserProfile }     from "../../models/Profile/profile.model.js";
- 
- 
 
 const now = () => new Date();
 
 const EVENT_CARD_SELECT =
   "name banner type genre location locationId startDate endDate status isPublic clubId totalActivities totalRegistrations";
 
-// ─── Helper — paginate ────────────────────────────────────────────────────────
 function parsePage(query) {
   return {
     pageNumber: Math.max(parseInt(query.page  ?? 1,  10), 1),
@@ -22,16 +19,18 @@ function parsePage(query) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Ongoing Events   GET /events/discover/ongoing
-//    Published events that have started but not yet ended
-//    Visible: public ones + events from clubs the user is a member of
 // ─────────────────────────────────────────────────────────────────────────────
 export const getOngoingEvents = asynchandler(async (req, res) => {
   const { pageNumber, pageLimit } = parsePage(req.query);
   const skip = (pageNumber - 1) * pageLimit;
   const n    = now();
 
-  const memberships   = await ClubMembership.find({ user: req.user._id, status: "active" }).select("club").lean();
-  const memberClubIds = memberships.map((m) => m.club);
+  // FIX: model uses userId and clubId (not user/club), status "approved" (not "active")
+  const memberships   = await ClubMembership.find({
+    userId: req.user._id,
+    status: "approved",
+  }).select("clubId").lean();
+  const memberClubIds = memberships.map((m) => m.clubId);
 
   const filter = {
     status:    "published",
@@ -47,7 +46,7 @@ export const getOngoingEvents = asynchandler(async (req, res) => {
     Event.find(filter)
       .select(EVENT_CARD_SELECT)
       .populate("clubId", "name logo")
-      .sort({ endDate: 1 })        // ending soonest first
+      .sort({ endDate: 1 })
       .skip(skip)
       .limit(pageLimit)
       .lean(),
@@ -56,14 +55,13 @@ export const getOngoingEvents = asynchandler(async (req, res) => {
 
   return res.json(new ApiResponse(200, {
     events, total, page: pageNumber, limit: pageLimit,
-    totalPages: Math.ceil(total / pageLimit),
+    totalPages:  Math.ceil(total / pageLimit),
     hasNextPage: skip + events.length < total,
   }));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 2. District Events   GET /events/discover/district
-//    Upcoming published public events in the user's district
 // ─────────────────────────────────────────────────────────────────────────────
 export const getDistrictEvents = asynchandler(async (req, res) => {
   const { pageNumber, pageLimit } = parsePage(req.query);
@@ -98,21 +96,24 @@ export const getDistrictEvents = asynchandler(async (req, res) => {
 
   return res.json(new ApiResponse(200, {
     events, total, page: pageNumber, limit: pageLimit,
-    totalPages: Math.ceil(total / pageLimit),
+    totalPages:  Math.ceil(total / pageLimit),
     hasNextPage: skip + events.length < total,
   }));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. Club Events   GET /events/discover/clubs
-//    Upcoming events from clubs the user is an active member of
 // ─────────────────────────────────────────────────────────────────────────────
 export const getClubEvents = asynchandler(async (req, res) => {
   const { pageNumber, pageLimit } = parsePage(req.query);
   const skip = (pageNumber - 1) * pageLimit;
 
-  const memberships   = await ClubMembership.find({ user: req.user._id, status: "active" }).select("club").lean();
-  const memberClubIds = memberships.map((m) => m.club);
+  // FIX: model uses userId and clubId, status "approved"
+  const memberships   = await ClubMembership.find({
+    userId: req.user._id,
+    status: "approved",
+  }).select("clubId").lean();
+  const memberClubIds = memberships.map((m) => m.clubId);
 
   if (!memberClubIds.length) {
     return res.json(new ApiResponse(200, {
@@ -140,14 +141,13 @@ export const getClubEvents = asynchandler(async (req, res) => {
 
   return res.json(new ApiResponse(200, {
     events, total, page: pageNumber, limit: pageLimit,
-    totalPages: Math.ceil(total / pageLimit),
+    totalPages:  Math.ceil(total / pageLimit),
     hasNextPage: skip + events.length < total,
   }));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. Public Events   GET /events/discover/public
-//    All upcoming published public events — global explore tab
 // ─────────────────────────────────────────────────────────────────────────────
 export const getPublicEvents = asynchandler(async (req, res) => {
   const { pageNumber, pageLimit } = parsePage(req.query);
@@ -172,7 +172,7 @@ export const getPublicEvents = asynchandler(async (req, res) => {
 
   return res.json(new ApiResponse(200, {
     events, total, page: pageNumber, limit: pageLimit,
-    totalPages: Math.ceil(total / pageLimit),
+    totalPages:  Math.ceil(total / pageLimit),
     hasNextPage: skip + events.length < total,
   }));
 });
