@@ -3,12 +3,33 @@ import { EventParticipation } from "../../../models/event/participation.model.js
 import { Activity }           from "../../../models/event/Activity/masterday.model.js";
 import { Event }              from "../../../models/event/event.model.js";
 import User                   from "../../../models/Profile/auth.models.js";
+import { UserProfile }        from "../../../models/Profile/profile.model.js";
 import admin                  from "../../../../config/firebase.js";
 import { ApiError }           from "../../../utils/ApiError.js";
 import { ApiResponse }        from "../../../utils/ApiResponse.js";
 import { asynchandler }       from "../../../utils/asynchandler.js";
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+/* ══════════════════════════════════════════════════════════
+   CHECK CONTACT REQUIRED
+   GET /api/v1/events/participation/check-contact
+   Auth: required
+   Returns: { contactRequired: bool, phone: string|null }
+   Flutter calls this before showing the registration sheet —
+   if contactRequired=true, show a phone number input field.
+══════════════════════════════════════════════════════════ */
+export const checkContactRequired = asynchandler(async (req, res) => {
+  const profile = await UserProfile.findOne({ userId: req.user._id })
+    .select("socialLinks.phone")
+    .lean();
+
+  const phone = profile?.socialLinks?.phone?.trim() || null;
+
+  return res.status(200).json(
+    new ApiResponse(200, { contactRequired: !phone, phone }, "Contact check done")
+  );
+});
 
 /* ══════════════════════════════════════════════════════════
    REGISTER FOR ACTIVITY
@@ -19,7 +40,7 @@ const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
    Note: activityId is required — registration is per-activity
 ══════════════════════════════════════════════════════════ */
 export const registerForActivity = asynchandler(async (req, res) => {
-  const { eventId, activityId, role, userName, teamName, teamMembers } = req.body;
+  const { eventId, activityId, role, userName, teamName, teamMembers, mobileNumber } = req.body;
 
   if (!eventId || !activityId || !role || !userName) {
     throw new ApiError(400, "eventId, activityId, role, and userName are required");
@@ -33,12 +54,42 @@ export const registerForActivity = asynchandler(async (req, res) => {
     throw new ApiError(400, "Invalid eventId or activityId");
   }
 
-  // Verify event is published
+  // ── Contact number check ─────────────────────────────────────────────────
+  // If the user has no phone on their profile, mobileNumber must be provided.
+  // If provided, save it to their profile immediately so they don't get asked again.
+  const profile = await UserProfile.findOne({ userId: req.user._id })
+    .select("socialLinks")
+    .lean();
+
+  const existingPhone = profile?.socialLinks?.phone?.trim() || null;
+
+  if (!existingPhone) {
+    if (!mobileNumber || !mobileNumber.toString().trim()) {
+      throw new ApiError(400, "mobileNumber is required — please provide your contact number");
+    }
+
+    const cleaned = mobileNumber.toString().trim();
+
+    // Basic validation: 10-digit Indian number (with optional +91 prefix)
+    const phoneRegex = /^(\+91)?[6-9]\d{9}$/;
+    if (!phoneRegex.test(cleaned.replace(/\s/g, ""))) {
+      throw new ApiError(400, "Please provide a valid 10-digit mobile number");
+    }
+
+    // Save to profile so future registrations skip this step
+    await UserProfile.findOneAndUpdate(
+      { userId: req.user._id },
+      { $set: { "socialLinks.phone": cleaned } }
+    );
+  }
+  // If existingPhone is present, we skip — no action needed.
+
+  // ── Verify event is published ────────────────────────────────────────────
   const event = await Event.findById(eventId).select("status name").lean();
   if (!event) throw new ApiError(404, "Event not found");
   if (event.status !== "published") throw new ApiError(400, "Event is not open for registration");
 
-  // Verify activity exists, belongs to event, and registration is open
+  // ── Verify activity exists, belongs to event, and registration is open ───
   const activity = await Activity.findOne({ _id: activityId, eventId })
     .select("activityName status registrationDeadline maxParticipants registrationsCount participationFee teamAllowed teamSize")
     .lean();
@@ -49,12 +100,12 @@ export const registerForActivity = asynchandler(async (req, res) => {
     throw new ApiError(400, "Registration deadline for this activity has passed");
   }
 
-  // Check capacity
+  // ── Check capacity ───────────────────────────────────────────────────────
   if (activity.maxParticipants !== null && activity.registrationsCount >= activity.maxParticipants) {
     throw new ApiError(400, "This activity has reached maximum capacity");
   }
 
-  // Team validation
+  // ── Team validation ──────────────────────────────────────────────────────
   if (role === "participant" && activity.teamAllowed) {
     if (!teamName) throw new ApiError(400, "teamName is required for team-based activities");
     const memberCount = (teamMembers || []).length + 1; // +1 for the registering user
@@ -63,28 +114,27 @@ export const registerForActivity = asynchandler(async (req, res) => {
     }
   }
 
-  // Duplicate check
+  // ── Duplicate check ──────────────────────────────────────────────────────
   const existing = await EventParticipation.findOne({ activityId, userId: req.user._id }).lean();
   if (existing) throw new ApiError(409, "You are already registered for this activity");
 
+  // ── Create participation ─────────────────────────────────────────────────
   const participation = await EventParticipation.create({
     eventId,
     activityId,
-    userId: req.user._id,
+    userId:      req.user._id,
     userName,
     role,
     teamName:    teamName    || null,
     teamMembers: teamMembers || [],
-    paymentStatus: activity.participationFee > 0 ? "pending" : "done",
-    _wasNew: true,
+    paymentStatus: (activity.participationFee ?? 0) > 0 ? "pending" : "done",
   });
 
-  // FCM — subscribe device to activity topic for push updates (non-blocking)
-  const userDoc = await User.findById(req.user._id).select("deviceTokens").lean();
-  const tokens  = (userDoc?.deviceTokens || []).filter(Boolean);
-  if (tokens.length > 0) {
+  // ── FCM: subscribe device to activity topic for push updates ─────────────
+  const userDoc = await User.findById(req.user._id).select("deviceToken").lean();
+  if (userDoc?.deviceToken) {
     admin.messaging()
-      .subscribeToTopic(tokens, `activity_${activityId}`)
+      .subscribeToTopic([userDoc.deviceToken], `activity_${activityId}`)
       .catch((e) => console.error("FCM subscribe:", e.message));
   }
 
@@ -108,11 +158,10 @@ export const cancelRegistration = asynchandler(async (req, res) => {
   if (!record) throw new ApiError(404, "Registration not found");
 
   // Unsubscribe from FCM topic (non-blocking)
-  const userDoc = await User.findById(req.user._id).select("deviceTokens").lean();
-  const tokens  = (userDoc?.deviceTokens || []).filter(Boolean);
-  if (tokens.length > 0) {
+  const userDoc = await User.findById(req.user._id).select("deviceToken").lean();
+  if (userDoc?.deviceToken) {
     admin.messaging()
-      .unsubscribeFromTopic(tokens, `activity_${activityId}`)
+      .unsubscribeFromTopic([userDoc.deviceToken], `activity_${activityId}`)
       .catch((e) => console.error("FCM unsubscribe:", e.message));
   }
 

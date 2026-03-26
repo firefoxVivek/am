@@ -9,6 +9,7 @@ import {
   getMyRegistrations,
   getMyRegistrationsCalendar,
   notifyActivityParticipants,
+  checkContactRequired,
 } from "../../../controllers/events/Activity/participation.controller.js";
 import { verifyJWT } from "../../../middleware/auth.middleware.js";
 
@@ -18,6 +19,9 @@ const router = express.Router();
  * Base: /api/v1/events/participation
  * Rule: /me/* and static paths MUST come before /:participationId param routes
  */
+
+// ── Contact check (Flutter calls before showing registration sheet) ──
+router.get("/check-contact",                  verifyJWT, checkContactRequired);          // GET  /participation/check-contact
 
 // ── My registrations (most specific first) ───────────────
 router.get("/me/calendar",                    verifyJWT, getMyRegistrationsCalendar);   // GET  /participation/me/calendar

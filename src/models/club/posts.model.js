@@ -2,9 +2,7 @@ import mongoose from "mongoose";
 
 const postSchema = new mongoose.Schema(
   {
-    /* =========================
-       BASIC POST INFO
-    ========================== */
+
     clubId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Club",
@@ -38,9 +36,7 @@ const postSchema = new mongoose.Schema(
       index: true,
     },
 
-    /* =========================
-       TAGGING (ID + NAME)
-    ========================== */
+
     taggedUsers: [
       {
         userId: {
@@ -56,24 +52,18 @@ const postSchema = new mongoose.Schema(
       },
     ],
 
-    /* =========================
-       PUBLISHING
-    ========================== */
     publishAt: {
       type: Date,
       default: Date.now,
       index: true,
     },
 
-    // Auto-expire ONLY when set
     expireAt: {
       type: Date,
       default: null,
     },
 
-    /* =========================
-       MODERATION & STATE
-    ========================== */
+
     isEdited: {
       type: Boolean,
       default: false,
@@ -88,24 +78,11 @@ const postSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-/* =========================
-   INDEXES
-========================== */
 
-// Feed optimization
 postSchema.index({ clubId: 1, publishAt: -1 });
 
-// TTL (only docs with expireAt set)
-postSchema.index({ expireAt: 1 }, { expireAfterSeconds: 0 });
 
-/* ---------------------------------------------------------------
-   POST-HOOKS — maintain totalPosts on UserProfile
-   Only real new posts increment the counter.
-   Soft-deleted posts (isDeleted = true) are NOT counted here
-   because we track the raw creation count — the UI can filter.
-   If you want to decrement on soft-delete, add a pre("save") flag
-   and a post("save") check for isDeleted transition.
---------------------------------------------------------------- */
+postSchema.index({ expireAt: 1 }, { expireAfterSeconds: 0 });
 
 postSchema.pre("save", function (next) {
   this._wasNew = this.isNew;
@@ -123,10 +100,8 @@ postSchema.post("save", async function (doc) {
   ).catch((e) => console.error("[ClubPost hook] totalPosts inc failed:", e.message));
 });
 
-// Hard-delete path — decrement only if the deleted post was not already soft-deleted
-// (to avoid double-counting if you later add soft-delete decrement too)
 postSchema.post("findOneAndDelete", async function (doc) {
-  if (!doc || doc.isDeleted) return; // already handled if soft-delete decrements
+   if (!doc || doc.isDeleted) return; 
 
   const UserProfile = mongoose.model("UserProfile");
 
@@ -135,9 +110,5 @@ postSchema.post("findOneAndDelete", async function (doc) {
     { $inc: { totalPosts: -1 } }
   ).catch((e) => console.error("[ClubPost hook] totalPosts dec failed:", e.message));
 });
-
-/* ---------------------------------------------------------------
-   EXPORT
---------------------------------------------------------------- */
 
 export const ClubPost = mongoose.model("ClubPost", postSchema);
