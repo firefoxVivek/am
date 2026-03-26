@@ -31,5 +31,5 @@ export const signupOtpEmail = async (to, subject, otp) => {
 };
 
 
-signupOtpEmail("tiwarishiv7169@gmail.com","testemail",5950)
+ 
 

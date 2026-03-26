@@ -25,21 +25,19 @@ const generateAccessAndRefereshTokens = async (userId) => {
   }
 };
 
-const registerUser = async (req, res) => {
+const registerUser = asynchandler(async (req, res) => {
   const { email, password, role } = req.body;
+
+
 
   /* ---------------- Validation ---------------- */
   if (!email || !password) {
     throw new ApiError(400, "Email and password are required");
   }
 
-  // Define allowed roles for registration
   const allowedRoles = ["user", "institution", "club"];
-  
-  // Validate role: Default to "user" if not provided, 
-  // but ensure it's one of the allowed roles
-  const assignedRole = role && allowedRoles.includes(role.toLowerCase()) 
-    ? role.toLowerCase() 
+  const assignedRole = role && allowedRoles.includes(role.toLowerCase())
+    ? role.toLowerCase()
     : "user";
 
   if ([email, password].some((f) => f.trim() === "")) {
@@ -48,31 +46,37 @@ const registerUser = async (req, res) => {
 
   /* ---------------- Check existing user ---------------- */
   const existingUser = await User.findOne({ email }).lean();
-
   if (existingUser) {
     throw new ApiError(409, "User with this email already exists");
   }
+
 
   /* ---------------- Create Pending User ---------------- */
   const authUser = await User.create({
     email,
     password,
-    role: assignedRole,          // ✅ Now dynamically assigned
-    status: "pending",           // OTP not verified yet
-    isProfileComplete: false,    // username + displayName pending
+    role: assignedRole,
+    status: "pending",
+    isProfileComplete: false,
   });
+
 
   /* ---------------- Generate OTP ---------------- */
   const otp = generateNumericOTP();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-  await otpModel.create({
-    email,
-    otp,
-    expiresAt,
-  });
+  await otpModel.create({ email, otp, expiresAt });
 
-  await signupOtpEmail(email, "OTP for Email Verification", otp);
+
+  /* ---------------- Send Email ---------------- */
+
+  try {
+    await signupOtpEmail(email, "OTP for Email Verification", otp);
+
+  } catch (emailErr) {
+
+    // User and OTP are created — don't block registration, just log
+  }
 
   /* ---------------- Response ---------------- */
   return res.status(201).json(
@@ -81,13 +85,13 @@ const registerUser = async (req, res) => {
       {
         userId: authUser._id,
         email: authUser.email,
-        role: authUser.role,     // ✅ Return role so frontend knows the flow
+        role: authUser.role,
         status: authUser.status,
       },
       "Registration successful. Please verify OTP."
     )
   );
-};
+});
 
   const verifyOtp = async (req, res) => {
   const { email, otp } = req.body;
