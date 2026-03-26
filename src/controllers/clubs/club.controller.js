@@ -235,7 +235,6 @@ export const getClubById = async (req, res) => {
   const clubId = new mongoose.Types.ObjectId(Id);
   const userOid = new mongoose.Types.ObjectId(userId);
 
-  // ── Fetch club and membership in parallel ──────────────────────────────
   const [clubs, membership] = await Promise.all([
     Club.findOne({ _id: clubId, status: "active" }).lean(),
     ClubMembership.findOne({ clubId, userId: userOid })
@@ -243,7 +242,7 @@ export const getClubById = async (req, res) => {
       .lean(),
   ]);
 
-  const club = clubs; // just renaming for clarity below
+  const club = clubs;
 
   if (!club) {
     return res.status(404).json({
@@ -252,14 +251,10 @@ export const getClubById = async (req, res) => {
     });
   }
 
-  // ── Derive flags purely from the membership doc ────────────────────────
-  // membership.status === "approved"  → active member/admin/owner
-  // membership.status === "pending"   → has a join request in flight
-  // membership === null               → no relationship at all
   const membershipStatus = membership?.status ?? null;
-  const myRole           = membershipStatus === "approved" ? membership.role : "none";
-  const isMember         = membershipStatus === "approved";
-  const hasRequested     = membershipStatus === "pending";
+  const myRole = membershipStatus === "approved" ? membership.role : "none";
+  const isMember = membershipStatus === "approved";
+  const hasRequested = membershipStatus === "pending";
 
   return res.status(200).json({
     success: true,
@@ -272,7 +267,6 @@ export const getClubById = async (req, res) => {
   });
 };
 
- 
 export const getClubByUserId = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -309,7 +303,6 @@ export const getClubByUserId = async (req, res) => {
     return res
       .status(200)
       .json(new ApiResponse(200, formattedClub, "Club fetched successfully"));
-
   } catch (error) {
     console.error("Error in getClubByUserId:", error);
     return res.status(500).json({
@@ -318,7 +311,6 @@ export const getClubByUserId = async (req, res) => {
     });
   }
 };
-
 
 // This API finds the club regardless of its status
 export const getDeletedClubByUserId = async (req, res) => {
@@ -561,7 +553,7 @@ export const getMyClub = async (req, res) => {
   res.status(200).json({ data: club });
 };
 
-export const getMyClubs =  (async (req, res) => {
+export const getMyClubs = async (req, res) => {
   const userId = req.user._id;
 
   const memberships = await ClubMembership.find({
@@ -587,7 +579,7 @@ export const getMyClubs =  (async (req, res) => {
   return res
     .status(200)
     .json(new ApiResponse(200, clubs, "Clubs fetched successfully"));
-});
+};
 
 export const getMyAdminClubs = async (req, res) => {
   const clubs = await Club.find({ admins: req.user._id });

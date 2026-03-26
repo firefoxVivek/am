@@ -53,7 +53,7 @@ router.get("/search", searchClubs);
 router.get("/:clubId", getClubByClubId);
 
 
-router.get("/id/:Id", getClubById);
+router.get("/id/:Id",verifyJWT, getClubById);
 
 router.get("/user/myclub", verifyJWT, getClubByUserId);
 
