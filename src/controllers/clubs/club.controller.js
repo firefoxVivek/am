@@ -246,16 +246,16 @@ export const getClubById = async (req, res) => {
     {
       $addFields: {
         isOwner: {
-          $eq: ["$owner.id", userId],
+          $eq: ["$owner.id", new mongoose.Types.ObjectId(userId)],
         },
       },
     },
 
-    /** 👥 MEMBERSHIP (member OR admin) */
+    /** 👥 MEMBERSHIP (owner OR admin OR member with approved status) */
     {
       $lookup: {
-        from: "clubMemberships",
-        let: { clubId: "$_id", userId },
+        from: "clubmemberships",
+        let: { clubId: "$_id", userId: new mongoose.Types.ObjectId(userId) },
         pipeline: [
           {
             $match: {
@@ -263,8 +263,8 @@ export const getClubById = async (req, res) => {
                 $and: [
                   { $eq: ["$clubId", "$$clubId"] },
                   { $eq: ["$userId", "$$userId"] },
-                  { $in: ["$role", ["member", "admin"]] },
-                  { $eq: ["$status", "active"] },
+                  { $in: ["$role", ["owner", "admin", "member"]] },
+                  { $eq: ["$status", "approved"] },
                 ],
               },
             },
@@ -279,7 +279,7 @@ export const getClubById = async (req, res) => {
     {
       $lookup: {
         from: "clubjoinrequests",
-        let: { clubId: "$_id", userId },
+        let: { clubId: "$_id", userId: new mongoose.Types.ObjectId(userId) },
         pipeline: [
           {
             $match: {
@@ -310,6 +310,19 @@ export const getClubById = async (req, res) => {
             { $eq: [{ $size: "$membership" }, 0] },
             { $gt: [{ $size: "$joinRequest" }, 0] },
           ],
+        },
+        myRole: {
+          $cond: {
+            if: "$isOwner",
+            then: "owner",
+            else: {
+              $cond: {
+                if: { $gt: [{ $size: "$membership" }, 0] },
+                then: { $arrayElemAt: ["$membership.role", 0] },
+                else: "none",
+              },
+            },
+          },
         },
       },
     },
