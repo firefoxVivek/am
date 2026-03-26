@@ -233,121 +233,42 @@ export const getClubById = async (req, res) => {
   }
 
   const clubId = new mongoose.Types.ObjectId(Id);
+  const userOid = new mongoose.Types.ObjectId(userId);
 
-  const club = await Club.aggregate([
-    {
-      $match: {
-        _id: clubId,
-        status: "active",
-      },
-    },
-
-    /** 👤 OWNER CHECK */
-    {
-      $addFields: {
-        isOwner: {
-          $eq: ["$owner.id", new mongoose.Types.ObjectId(userId)],
-        },
-      },
-    },
-
-    /** 👥 MEMBERSHIP (owner OR admin OR member with approved status) */
-    {
-      $lookup: {
-        from: "clubmemberships",
-        let: { clubId: "$_id", userId: new mongoose.Types.ObjectId(userId) },
-        pipeline: [
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $eq: ["$clubId", "$$clubId"] },
-                  { $eq: ["$userId", "$$userId"] },
-                  { $in: ["$role", ["owner", "admin", "member"]] },
-                  { $eq: ["$status", "approved"] },
-                ],
-              },
-            },
-          },
-          { $limit: 1 },
-        ],
-        as: "membership",
-      },
-    },
-
-    /** 📨 JOIN REQUEST */
-    {
-      $lookup: {
-        from: "clubjoinrequests",
-        let: { clubId: "$_id", userId: new mongoose.Types.ObjectId(userId) },
-        pipeline: [
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $eq: ["$clubId", "$$clubId"] },
-                  { $eq: ["$userId", "$$userId"] },
-                  { $eq: ["$status", "pending"] },
-                ],
-              },
-            },
-          },
-          { $limit: 1 },
-        ],
-        as: "joinRequest",
-      },
-    },
-
-    /** 🧠 FINAL FLAGS */
-    {
-      $addFields: {
-        isMember: {
-          $or: ["$isOwner", { $gt: [{ $size: "$membership" }, 0] }],
-        },
-        hasRequested: {
-          $and: [
-            { $not: "$isOwner" },
-            { $eq: [{ $size: "$membership" }, 0] },
-            { $gt: [{ $size: "$joinRequest" }, 0] },
-          ],
-        },
-        myRole: {
-          $cond: {
-            if: "$isOwner",
-            then: "owner",
-            else: {
-              $cond: {
-                if: { $gt: [{ $size: "$membership" }, 0] },
-                then: { $arrayElemAt: ["$membership.role", 0] },
-                else: "none",
-              },
-            },
-          },
-        },
-      },
-    },
-
-    /** 🧹 CLEANUP */
-    {
-      $project: {
-        membership: 0,
-        joinRequest: 0,
-        isOwner: 0,
-        __v: 0,
-      },
-    },
+  // ── Fetch club and membership in parallel ──────────────────────────────
+  const [clubs, membership] = await Promise.all([
+    Club.findOne({ _id: clubId, status: "active" }).lean(),
+    ClubMembership.findOne({ clubId, userId: userOid })
+      .select("role status")
+      .lean(),
   ]);
 
-  if (!club.length) {
+  const club = clubs; // just renaming for clarity below
+
+  if (!club) {
     return res.status(404).json({
       success: false,
       message: "Club not found",
     });
   }
 
+  // ── Derive flags purely from the membership doc ────────────────────────
+  // membership.status === "approved"  → active member/admin/owner
+  // membership.status === "pending"   → has a join request in flight
+  // membership === null               → no relationship at all
+  const membershipStatus = membership?.status ?? null;
+  const myRole           = membershipStatus === "approved" ? membership.role : "none";
+  const isMember         = membershipStatus === "approved";
+  const hasRequested     = membershipStatus === "pending";
+
   return res.status(200).json({
     success: true,
-    data: club[0],
+    data: {
+      ...club,
+      isMember,
+      hasRequested,
+      myRole,
+    },
   });
 };
 

@@ -57,7 +57,8 @@ const ClubSchema = new mongoose.Schema(
     },
 
     membersCount: { type: Number, default: 0 },
-    postsCount: { type: Number, default: 0 },
+    postsCount:   { type: Number, default: 0 },
+    eventsCount:  { type: Number, default: 0 },
     createdBySystem: { type: Boolean, default: false },
   },
   { timestamps: true }
